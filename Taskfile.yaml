@@ -1,0 +1,34 @@
+# https://taskfile.dev
+version: '3'
+
+vars:
+  ALL: ./...
+
+tasks:
+  gen:
+    desc: Generate gRPC code from proto
+    cmds:
+      - buf generate
+
+  go-fmt:
+    cmds:
+      - go fmt '{{.ALL}}'
+
+  go-vet:
+    cmds:
+      - go vet '{{.ALL}}'
+
+  go-test:
+    cmds:
+      - go test -race -cover '{{.ALL}}'
+
+  go-lint:
+    cmds:
+      - golangci-lint run --fix
+
+  sanity:
+    cmds:
+      - task: go-fmt
+      - task: go-vet
+      - task: go-lint
+      - task: go-test

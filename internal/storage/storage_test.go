@@ -39,22 +39,18 @@ func (s *StorageTestSuite) SetupTest() {
 	)
 	s.Require().NoError(err)
 	s.Require().NoError(err)
-	
-}
-func (s *StorageTestSuite) TearDownTest() {
-	_ = s.storage.Close()
 }
 
 func (s *StorageTestSuite) TestWrite() {
 	ctx := s.T().Context()
-	chunk := s.newChunk(16)
-	id, err := s.storage.Write(ctx, &Chunk{1, chunk})
+	record := s.newRecord(16)
+	id, err := s.storage.Write(ctx, &Record{1, record})
 	s.Require().NoError(err)
 	s.Require().NotZero(id)
 	
 	err = s.storage.wal.Replay(1, func(entry wal.Entry) error {
 		s.Require().Equal(id, entry.LSN)
-		s.Require().Equal(chunk, entry.Payload)
+		s.Require().Equal(record, entry.Payload)
 		return nil
 	})
 	
@@ -63,42 +59,70 @@ func (s *StorageTestSuite) TestWrite() {
 
 func (s *StorageTestSuite) TestWrite_RejectOnZeroKey() {
 	ctx := s.T().Context()
-	id, err := s.storage.Write(ctx, &Chunk{0, s.newChunk(8)})
+	id, err := s.storage.Write(ctx, &Record{0, s.newRecord(8)})
 	s.Require().ErrorIs(err, ErrEmptyDedupKey)
 	s.Require().Zero(id)
 }
 
 func (s *StorageTestSuite) TestWrite_RejectOnEmptyChunk() {
 	ctx := s.T().Context()
-	id, err := s.storage.Write(ctx, &Chunk{2, nil})
-	s.Require().ErrorIs(err, ErrEmptyChunk)
+	id, err := s.storage.Write(ctx, &Record{2, nil})
+	s.Require().ErrorIs(err, ErrEmptyRecord)
 	s.Require().Zero(id)
 }
 
 func (s *StorageTestSuite) TestWrite_RejectDuplicate() {
 	ctx := s.T().Context()
-	id1, err1 := s.storage.Write(ctx, &Chunk{2, s.newChunk(8)})
+	id1, err1 := s.storage.Write(ctx, &Record{2, s.newRecord(8)})
 	s.Require().NoError(err1)
 	s.Require().NotZero(id1)
-	id2, err2 := s.storage.Write(ctx, &Chunk{2, s.newChunk(12)})
+	id2, err2 := s.storage.Write(ctx, &Record{2, s.newRecord(12)})
 	s.Require().ErrorIs(err2, dedup.ErrDuplicateChunk)
 	s.Require().Zero(id2)
 }
 
 func (s *StorageTestSuite) TestRead() {
 	ctx := s.T().Context()
-	chunk := s.newChunk(16)
-	id, err := s.storage.Write(ctx, &Chunk{1, chunk})
+	record := s.newRecord(16)
+	id, err := s.storage.Write(ctx, &Record{1, record})
 	s.Require().NoError(err)
 	s.Require().NotZero(id)
 	
 	readChunk, err := s.storage.Read(ctx, id)
 	s.Require().NoError(err)
-	s.Require().Equal(id, readChunk.Key)
-	s.Require().Equal(chunk, readChunk.Bytes)
+	s.Require().Equal(id, readChunk.DedupKey)
+	s.Require().Equal(record, readChunk.Bytes)
 }
 
-func (s *StorageTestSuite) newChunk(length int) []byte {
+func (s *StorageTestSuite) TestWriteBatchExcludesDuplicates() {
+	ctx := s.T().Context()
+	
+	seed := []*Record{
+		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)},
+		{DedupKey: 2, Bytes: []byte(`{"op":"set","k":"b"}`)},
+	}
+	_, _, err := s.storage.WriteBatch(ctx, seed)
+	s.Require().NoError(err)
+	
+	input := []*Record{
+		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)}, // duplicate
+		{DedupKey: 3, Bytes: []byte(`{"op":"set","k":"c"}`)}, // new
+	}
+	actualIDs, actualDups, err := s.storage.WriteBatch(ctx, input)
+	s.Require().NoError(err)
+	
+	expectedDups := 1
+	expectedWritten := 1
+	s.Require().Equal(expectedDups, actualDups)
+	s.Require().Len(actualIDs, expectedWritten)
+	
+	actual, err := s.storage.Read(ctx, actualIDs[0])
+	s.Require().NoError(err)
+	expectedPayload := []byte(`{"op":"set","k":"c"}`)
+	s.Require().Equal(expectedPayload, actual.Bytes)
+}
+
+func (s *StorageTestSuite) newRecord(length int) []byte {
 	s.T().Helper()
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	result := make([]byte, length)

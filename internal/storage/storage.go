@@ -3,7 +3,9 @@ package storage
 import (
 	"context"
 	"io"
+	"sync"
 	
+	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
 	"github.com/barnowlsnest/stratus/internal/dedup"
 )
@@ -11,15 +13,16 @@ import (
 const defaultReadBatchSize = 64
 
 type (
-	Chunk struct {
-		Key   uint64
-		Bytes []byte
+	Record struct {
+		DedupKey uint64
+		Bytes    []byte
 	}
 	
 	Storage struct {
-		maxReadBatchSize uint64
+		maxReadBatchSize int
 		wal              *wal.WAL
 		dup              *dedup.Deduplicator
+		subsWG           sync.WaitGroup
 	}
 	
 	Option func(*Storage)
@@ -37,7 +40,7 @@ func WithDeduplicator(d *dedup.Deduplicator) Option {
 	}
 }
 
-func WithMaxReadBatchSize(size uint64) Option {
+func WithMaxReadBatchSize(size int) Option {
 	return func(s *Storage) {
 		s.maxReadBatchSize = size
 	}
@@ -77,29 +80,29 @@ func (s *Storage) applyDefaults() {
 	}
 }
 
-func (ch *Chunk) validate() error {
+func (r *Record) validate() error {
 	switch {
-	case ch == nil:
-		return ErrNilChunk
-	case ch.Key == 0:
+	case r == nil:
+		return ErrNilRecord
+	case r.DedupKey == 0:
 		return ErrEmptyDedupKey
-	case len(ch.Bytes) == 0:
-		return ErrEmptyChunk
+	case len(r.Bytes) == 0:
+		return ErrEmptyRecord
 	default:
 		return nil
 	}
 }
 
-func (s *Storage) Write(ctx context.Context, chunk *Chunk) (uint64, error) {
-	if err := chunk.validate(); err != nil {
+func (s *Storage) Write(ctx context.Context, record *Record) (uint64, error) {
+	if err := record.validate(); err != nil {
 		return 0, err
 	}
 	
-	if err := s.dup.Try(chunk.Key); err != nil {
+	if err := s.dup.Try(record.DedupKey); err != nil {
 		return 0, err
 	}
 	
-	id, err := s.wal.Append(ctx, chunk.Bytes)
+	id, err := s.wal.Append(ctx, record.Bytes)
 	if err != nil {
 		return 0, err
 	}
@@ -107,29 +110,34 @@ func (s *Storage) Write(ctx context.Context, chunk *Chunk) (uint64, error) {
 	return id, nil
 }
 
-func (s *Storage) WriteBatch(ctx context.Context, chunks []*Chunk) (ids []uint64, dups int, err error) {
-	if len(chunks) == 0 {
-		return nil, 0, ErrEmptyChunk
+func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (ids []uint64, dups int, err error) {
+	if len(records) == 0 {
+		return nil, 0, ErrEmptyRecord
 	}
 	
-	batch := make([][]byte, len(chunks))
-	for i, chunk := range chunks {
+	batch := make([][]byte, 0, len(records))
+	for _, record := range records {
 		select {
 		case <-ctx.Done():
 			return nil, 0, ctx.Err()
 		default:
 		}
 		
-		if err = chunk.validate(); err != nil {
+		if err = record.validate(); err != nil {
 			return nil, 0, err
 		}
 		
-		if err = s.dup.Try(chunk.Key); err != nil {
+		if err = s.dup.Try(record.DedupKey); err != nil {
 			dups++
+			
 			continue
 		}
 		
-		batch[i] = chunk.Bytes
+		batch = append(batch, record.Bytes)
+	}
+	
+	if len(batch) == 0 {
+		return nil, dups, nil
 	}
 	
 	ids, err = s.wal.AppendBatch(ctx, batch)
@@ -140,7 +148,7 @@ func (s *Storage) WriteBatch(ctx context.Context, chunks []*Chunk) (ids []uint64
 	return ids, dups, nil
 }
 
-func (s *Storage) Read(ctx context.Context, atID uint64) (*Chunk, error) {
+func (s *Storage) Read(ctx context.Context, atID uint64) (*Record, error) {
 	if atID == 0 {
 		atID = s.wal.FirstLSN()
 	}
@@ -173,15 +181,15 @@ func (s *Storage) Read(ctx context.Context, atID uint64) (*Chunk, error) {
 		return nil, err
 	}
 	
-	chunk := &Chunk{
-		Key:   atID,
-		Bytes: entry.Payload,
+	chunk := &Record{
+		DedupKey: atID,
+		Bytes:    entry.Payload,
 	}
 	
 	return chunk, nil
 }
 
-func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Chunk, error) {
+func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Record, error) {
 	if fromID == 0 {
 		fromID = s.wal.FirstLSN()
 	}
@@ -194,7 +202,8 @@ func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Chunk,
 	switch {
 	case toID < fromID:
 		return nil, ErrOutOfBounds
-	case length > s.maxReadBatchSize:
+	case int(length) > s.maxReadBatchSize:
+		return nil, ErrTooLongRangeToRead
 	case s.wal.LastLSN() < fromID:
 		return nil, ErrOutOfBounds
 	case s.wal.FirstLSN() > toID:
@@ -207,7 +216,7 @@ func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Chunk,
 	}
 	defer func() { _ = reader.Close() }()
 	
-	batch := make([]*Chunk, 0, toID-fromID+1)
+	batch := make([]*Record, 0, toID-fromID+1)
 	for reader.Next() {
 		select {
 		case <-ctx.Done():
@@ -224,9 +233,9 @@ func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Chunk,
 			break
 		}
 		
-		chunk := &Chunk{
-			Key:   entry.LSN,
-			Bytes: entry.Payload,
+		chunk := &Record{
+			DedupKey: entry.LSN,
+			Bytes:    entry.Payload,
 		}
 		
 		batch = append(batch, chunk)
@@ -246,6 +255,41 @@ func (s *Storage) Truncate(ctx context.Context, toID uint64) error {
 	return s.wal.TruncateContext(ctx, toID)
 }
 
-func (s *Storage) Close() error {
-	return s.wal.Close()
+func (s *Storage) Subscribe(ctx context.Context, fromID uint64, buffer int) (records <-chan *Record, err error) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	
+	f, err := s.wal.Follower(fromID, wal.WithFollow())
+	if err != nil {
+		closedCh := make(chan *Record)
+		close(closedCh)
+		return closedCh, err
+	}
+	
+	recordsCh := make(chan *Record, buffer)
+	s.subsWG.Go(func() {
+		defer close(recordsCh)
+		for entry := range f.RecordsChan(ctx) {
+			recordsCh <- &Record{DedupKey: entry.LSN, Bytes: entry.Payload}
+		}
+		
+		if errClose := f.Close(); errClose != nil {
+			sharedlog.Error(errClose)
+		}
+		if errFollower := f.Err(); errFollower != nil {
+			sharedlog.Error(errFollower)
+		}
+	})
+	
+	return recordsCh, nil
+}
+
+func (s *Storage) WaitForSubs() error {
+	s.subsWG.Wait()
+	return nil
+}
+
+func (s *Storage) Range() (first, last uint64) {
+	return s.wal.FirstLSN(), s.wal.LastLSN()
 }

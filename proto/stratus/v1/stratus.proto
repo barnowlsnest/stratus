@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package stratus.v1;
+
+option go_package = "github.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1;stratusv1";
+
+// StreamService exposes a single WAL as two bidirectional streams.
+service StreamService {
+  // Write appends records. Single and batch are distinct requests; both reply
+  // with the assigned LSN range.
+  rpc Write(stream WriteRequest) returns (stream WriteResponse);
+  // Read returns records by id (XREAD) or bounded range (XRANGE).
+  rpc Read(stream ReadRequest) returns (stream ReadResponse);
+}
+
+message Record {
+  uint64 dedup_key = 1;
+  bytes payload = 2;
+}
+
+message RecordBatch {
+  repeated Record records = 1;
+}
+
+message WriteRequest {
+  oneof payload {
+    Record record = 1;      // single append
+    RecordBatch batch = 2;  // batch append
+  }
+}
+
+message WriteResponse {
+  uint64 start = 1;
+  uint64 end = 2; // == start for a single record
+}
+
+message Range {
+  uint64 first = 1;
+  uint64 last = 2;
+}
+
+message ReadRequest {
+  oneof query {
+    uint64 id = 1;     // read one entry by LSN
+    Range range = 2;   // read a bounded LSN range
+  }
+}
+
+message Entry {
+  uint64 id = 1; // LSN
+  bytes payload = 2;
+}
+
+message ReadResponse {
+  repeated Entry entries = 1;
+}
