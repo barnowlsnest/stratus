@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os/signal"
 	"syscall"
 	"time"
 	
 	"github.com/barnowlsnest/go-configlib/v2/pkg/configs"
+	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
 	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/barnowlsnest/stratus/internal/ingester"
 	"github.com/barnowlsnest/stratus/internal/preloader"
+	"github.com/barnowlsnest/stratus/internal/server"
 	"github.com/barnowlsnest/stratus/internal/storage"
 	"github.com/barnowlsnest/stratus/internal/stream"
 	"golang.org/x/sync/errgroup"
@@ -22,13 +25,14 @@ type StratusConfig struct {
 	WALDir           string        `name:"wal_dir" usage:"wal segments folder"`
 	DedupTTL         time.Duration `name:"dedup_ttl" default:"1m" usage:"deduplication window"`
 	MaxBatchReadSize int           `name:"max_batch_read_size" default:"1024" usage:"maximum number of records to read in a single batch"`
+	CacheSize        int           `name:"cache_size" default:"4096" usage:"preloader LRU capacity"`
 	Port             int           `name:"port" usage:"port to listen on"`
 	Host             string        `name:"host" default:"0.0.0.0" usage:"host to listen on"`
 }
 
 func main() {
 	var cfg StratusConfig
-	_, err := configs.Resolve(&cfg, "stratus")
+	_, err := configs.Resolve(&cfg, "")
 	if err != nil {
 		log.Fatalf("failed to resolve config: %v", err)
 	}
@@ -62,39 +66,61 @@ func main() {
 	
 	pre, err := preloader.New(
 		preloader.WithStorage(store),
+		preloader.WithCache(lru.New[storage.Record](cfg.CacheSize)),
 	)
 	if err != nil {
 		_ = w.Close()
 		log.Fatalf("failed to create preloader: %v", err)
 	}
-	defer func() { pre.Stop() }()
 	
-	var preloadGroup errgroup.Group
-	preloadGroup.Go(func() error {
-		return pre.Start(ctx, r.FirstLSN, r.LastLSN)
-	})
-	preloadGroup.Go(func() error {
-		return pre.WaitStarted(ctx, 5*time.Second)
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		return pre.Start(gctx, r.FirstLSN, r.LastLSN)
 	})
 	
-	if err := preloadGroup.Wait(); err != nil {
+	if err := pre.WaitStarted(gctx, 5*time.Second); err != nil {
+		stop()
 		_ = w.Close()
-		log.Fatalf("failed to start preloader: %v", err)
+		log.Fatalf("preloader did not start: %v", err)
 	}
 	
 	cache, err := pre.Cache()
 	if err != nil {
+		stop()
 		_ = w.Close()
 		log.Fatalf("failed to create cache: %v", err)
 	}
 	
 	str, err := stream.New(
-		stream.WithCache(cache),
 		stream.WithIngester(in),
+		stream.WithCache(cache),
 	)
 	if err != nil {
+		stop()
 		_ = w.Close()
 		log.Fatalf("failed to create stream: %v", err)
 	}
 	
+	srv, err := server.New(
+		server.WithStream(str),
+		server.WithAddr(fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)),
+	)
+	if err != nil {
+		stop()
+		_ = w.Close()
+		log.Fatalf("failed to create server: %v", err)
+	}
+	
+	g.Go(func() error {
+		return srv.Run(gctx)
+	})
+	
+	if err := g.Wait(); err != nil {
+		log.Printf("server stopped: %v", err)
+	}
+	
+	pre.Stop()
+	if err := w.Close(); err != nil {
+		log.Printf("failed to close WAL: %v", err)
+	}
 }

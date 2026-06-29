@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"time"
-	
+
 	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
 	"github.com/barnowlsnest/go-logslib/v2/pkg/logger"
 	"github.com/barnowlsnest/stratus/internal/storage"
@@ -23,11 +23,11 @@ type (
 		cancel           context.CancelFunc
 		started          atomic.Bool
 	}
-	
+
 	Cache struct {
 		pre *Preloader
 	}
-	
+
 	Option func(*Preloader)
 )
 
@@ -60,15 +60,15 @@ func New(opts ...Option) (*Preloader, error) {
 	for _, opt := range opts {
 		opt(p)
 	}
-	
+
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
-	
+
 	if p.subscriberBuffer <= 0 {
 		p.subscriberBuffer = defaultSubscriberBufferSize
 	}
-	
+
 	return p, nil
 }
 
@@ -91,25 +91,25 @@ func (p *Preloader) Start(ctx context.Context, first, last uint64) error {
 	if p.IsStarted() {
 		return ErrAlreadyStarted
 	}
-	
+
 	pCtx, pCancel := context.WithCancel(ctx)
 	p.cancel = pCancel
-	
+
 	if err := p.fetchAndCacheRecords(pCtx, first, last); err != nil {
 		return err
 	}
-	
+
 	records, err := p.storage.Subscribe(pCtx, last, p.subscriberBuffer)
 	if err != nil {
 		return err
 	}
-	
+
 	p.started.Store(true)
 	for r := range records {
 		p.lru.Put(r.DedupKey, r)
 	}
 	p.started.Swap(false)
-	
+
 	return nil
 }
 
@@ -141,7 +141,7 @@ func (p *Preloader) WaitStarted(ctx context.Context, timeout time.Duration) erro
 			return errors.New("timeout waiting for preloader to start")
 		}
 	})
-	
+
 	return eg.Wait()
 }
 
@@ -153,7 +153,7 @@ func (p *Preloader) Cache() (*Cache, error) {
 	if !p.IsStarted() {
 		return nil, ErrNotStarted
 	}
-	
+
 	return &Cache{pre: p}, nil
 }
 
@@ -165,17 +165,17 @@ func (cache *Cache) RangeRecords(ctx context.Context, fromID, toID uint64) ([]*s
 	if err := cache.pre.fetchAndCacheRecords(ctx, fromID, toID); err != nil {
 		return nil, err
 	}
-	
+
 	records := make([]*storage.Record, 0, toID-fromID+1)
 	for id := fromID; id <= toID; id++ {
 		r, err := cache.pre.lazyLoadRecord(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		records = append(records, r)
 	}
-	
+
 	return records, nil
 }
 
@@ -189,7 +189,7 @@ func (p *Preloader) lazyLoadRecord(ctx context.Context, id uint64) (*storage.Rec
 			return nil, err
 		}
 	}
-	
+
 	return record, nil
 }
 
@@ -198,9 +198,9 @@ func (p *Preloader) readAndCacheRecord(ctx context.Context, id uint64) (*storage
 	if err != nil {
 		return nil, err
 	}
-	
+
 	p.lru.Put(r.DedupKey, r)
-	
+
 	return r, nil
 }
 
@@ -209,10 +209,10 @@ func (p *Preloader) fetchAndCacheRecords(ctx context.Context, fromID, toID uint6
 	if err != nil {
 		return err
 	}
-	
+
 	for _, r := range records {
 		p.lru.Put(r.DedupKey, r)
 	}
-	
+
 	return nil
 }

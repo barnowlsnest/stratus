@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	
+
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
 	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/stretchr/testify/suite"
@@ -47,13 +47,13 @@ func (s *StorageTestSuite) TestWrite() {
 	id, err := s.storage.Write(ctx, &Record{1, record})
 	s.Require().NoError(err)
 	s.Require().NotZero(id)
-	
+
 	err = s.storage.wal.Replay(1, func(entry wal.Entry) error {
 		s.Require().Equal(id, entry.LSN)
 		s.Require().Equal(record, entry.Payload)
 		return nil
 	})
-	
+
 	s.Require().NoError(err)
 }
 
@@ -87,7 +87,7 @@ func (s *StorageTestSuite) TestRead() {
 	id, err := s.storage.Write(ctx, &Record{1, record})
 	s.Require().NoError(err)
 	s.Require().NotZero(id)
-	
+
 	readChunk, err := s.storage.Read(ctx, id)
 	s.Require().NoError(err)
 	s.Require().Equal(id, readChunk.DedupKey)
@@ -96,30 +96,53 @@ func (s *StorageTestSuite) TestRead() {
 
 func (s *StorageTestSuite) TestWriteBatchExcludesDuplicates() {
 	ctx := s.T().Context()
-	
+
 	seed := []*Record{
 		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)},
 		{DedupKey: 2, Bytes: []byte(`{"op":"set","k":"b"}`)},
 	}
 	_, _, err := s.storage.WriteBatch(ctx, seed)
 	s.Require().NoError(err)
-	
+
 	input := []*Record{
 		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)}, // duplicate
 		{DedupKey: 3, Bytes: []byte(`{"op":"set","k":"c"}`)}, // new
 	}
 	actualIDs, actualDups, err := s.storage.WriteBatch(ctx, input)
 	s.Require().NoError(err)
-	
+
 	expectedDups := 1
 	expectedWritten := 1
 	s.Require().Equal(expectedDups, actualDups)
 	s.Require().Len(actualIDs, expectedWritten)
-	
+
 	actual, err := s.storage.Read(ctx, actualIDs[0])
 	s.Require().NoError(err)
 	expectedPayload := []byte(`{"op":"set","k":"c"}`)
 	s.Require().Equal(expectedPayload, actual.Bytes)
+}
+
+func (s *StorageTestSuite) TestReadBatchReturnsDistinctPayloads() {
+	ctx := s.T().Context()
+
+	input := []*Record{
+		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)},
+		{DedupKey: 2, Bytes: []byte(`{"op":"set","k":"b"}`)},
+		{DedupKey: 3, Bytes: []byte(`{"op":"set","k":"c"}`)},
+	}
+	ids, _, err := s.storage.WriteBatch(ctx, input)
+	s.Require().NoError(err)
+	s.Require().Len(ids, 3)
+
+	actual, err := s.storage.ReadBatch(ctx, ids[0], ids[len(ids)-1])
+	s.Require().NoError(err)
+	s.Require().Len(actual, 3)
+
+	// Each record must own its payload; a reused reader buffer would make them
+	// all equal to the last entry.
+	for i, want := range input {
+		s.Require().Equal(want.Bytes, actual[i].Bytes)
+	}
 }
 
 func (s *StorageTestSuite) newRecord(length int) []byte {
@@ -129,6 +152,6 @@ func (s *StorageTestSuite) newRecord(length int) []byte {
 	for i := 0; i < length; i++ {
 		result[i] = charset[r.Intn(len(charset))]
 	}
-	
+
 	return result
 }
