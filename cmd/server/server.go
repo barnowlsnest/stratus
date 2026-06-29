@@ -5,18 +5,24 @@ import (
 	"errors"
 	"io"
 	"net"
+	"time"
 
 	"github.com/barnowlsnest/stratus/internal/stream"
 	stratusv1 "github.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1"
 	"google.golang.org/grpc"
 )
 
+// defaultShutdownGrace bounds how long Run waits for in-flight RPCs to drain
+// gracefully before forcing connections closed.
+const defaultShutdownGrace = 5 * time.Second
+
 type (
 	// Server exposes a single stream.Stream over the gRPC StreamService.
 	Server struct {
 		stratusv1.UnimplementedStreamServiceServer
-		stream *stream.Stream
-		addr   string
+		stream        *stream.Stream
+		addr          string
+		shutdownGrace time.Duration
 	}
 
 	// Option configures a Server in New.
@@ -37,9 +43,17 @@ func WithAddr(addr string) Option {
 	}
 }
 
+// WithShutdownGrace bounds how long Run waits for in-flight RPCs to drain on
+// shutdown before forcing connections closed. Defaults to defaultShutdownGrace.
+func WithShutdownGrace(d time.Duration) Option {
+	return func(srv *Server) {
+		srv.shutdownGrace = d
+	}
+}
+
 // New builds a Server from the given options. It requires a stream.
 func New(opts ...Option) (*Server, error) {
-	s := &Server{}
+	s := &Server{shutdownGrace: defaultShutdownGrace}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -73,10 +87,30 @@ func (s *Server) Run(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
-		g.GracefulStop()
+		s.stop(g)
 	}()
 
 	return g.Serve(lis)
+}
+
+// stop drains in-flight RPCs gracefully, but only for shutdownGrace. Long-lived
+// idle streams never finish on their own, so GracefulStop would block forever;
+// once the grace elapses we force connections closed with Stop.
+func (s *Server) stop(g *grpc.Server) {
+	stopped := make(chan struct{})
+	go func() {
+		g.GracefulStop()
+		close(stopped)
+	}()
+
+	timer := time.NewTimer(s.shutdownGrace)
+	defer timer.Stop()
+
+	select {
+	case <-stopped:
+	case <-timer.C:
+		g.Stop()
+	}
 }
 
 // Write handles the bidirectional write stream: one request → one response.

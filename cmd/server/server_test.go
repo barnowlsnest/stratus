@@ -8,10 +8,10 @@ import (
 
 	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
+	"github.com/barnowlsnest/stratus/cmd/server"
 	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/barnowlsnest/stratus/internal/ingester"
 	"github.com/barnowlsnest/stratus/internal/preloader"
-	"github.com/barnowlsnest/stratus/internal/server"
 	"github.com/barnowlsnest/stratus/internal/storage"
 	"github.com/barnowlsnest/stratus/internal/stream"
 	stratusv1 "github.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1"
@@ -23,7 +23,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func newTestClient(t *testing.T) stratusv1.StreamServiceClient {
+func newTestStream(t *testing.T) *stream.Stream {
 	t.Helper()
 
 	w, r, err := wal.Open(t.TempDir(), wal.WithBatchSize(8))
@@ -54,7 +54,14 @@ func newTestClient(t *testing.T) stratusv1.StreamServiceClient {
 	require.NoError(t, err)
 	st, err := stream.New(stream.WithIngester(in), stream.WithCache(cache))
 	require.NoError(t, err)
-	srv, err := server.New(server.WithStream(st))
+
+	return st
+}
+
+func newTestClient(t *testing.T) stratusv1.StreamServiceClient {
+	t.Helper()
+
+	srv, err := server.New(server.WithStream(newTestStream(t)))
 	require.NoError(t, err)
 
 	lis := bufconn.Listen(1024 * 1024)
@@ -74,6 +81,61 @@ func newTestClient(t *testing.T) stratusv1.StreamServiceClient {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	return stratusv1.NewStreamServiceClient(conn)
+}
+
+// freeAddr reserves an ephemeral port and returns its address. The listener is
+// closed before returning so Run can bind it; the reuse window is acceptable in
+// tests.
+func freeAddr(t *testing.T) string {
+	t.Helper()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := lis.Addr().String()
+	require.NoError(t, lis.Close())
+
+	return addr
+}
+
+// TestServerShutdownWithIdleStream verifies Run returns promptly on context
+// cancellation even when a client holds an open but idle stream, rather than
+// blocking forever in GracefulStop.
+func TestServerShutdownWithIdleStream(t *testing.T) {
+	addr := freeAddr(t)
+	grace := 200 * time.Millisecond
+	srv, err := server.New(
+		server.WithStream(newTestStream(t)),
+		server.WithAddr(addr),
+		server.WithShutdownGrace(grace),
+	)
+	require.NoError(t, err)
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	runErr := make(chan error, 1)
+	go func() { runErr <- srv.Run(runCtx) }()
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	// Open a write stream on an independent context and keep it idle: never
+	// send, never close. This mimics a client that just stays connected and
+	// must not block the server's shutdown.
+	ws, err := stratusv1.NewStreamServiceClient(conn).Write(context.Background())
+	require.NoError(t, err)
+	// Force the stream to be established server-side by exchanging headers.
+	require.NoError(t, ws.Send(recordReq(1, `{"op":"set","k":"a"}`)))
+	_, err = ws.Recv()
+	require.NoError(t, err)
+
+	cancel()
+
+	select {
+	case err := <-runErr:
+		require.NoError(t, err)
+	case <-time.After(grace + 5*time.Second):
+		t.Fatal("Run did not return after context cancellation; shutdown hung on idle stream")
+	}
 }
 
 func recordReq(dedupKey uint64, payload string) *stratusv1.WriteRequest {

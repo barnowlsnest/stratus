@@ -8,10 +8,10 @@ import (
 
 	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
+	"github.com/barnowlsnest/stratus/cmd/server"
 	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/barnowlsnest/stratus/internal/ingester"
 	"github.com/barnowlsnest/stratus/internal/preloader"
-	"github.com/barnowlsnest/stratus/internal/server"
 	"github.com/barnowlsnest/stratus/internal/storage"
 	"github.com/barnowlsnest/stratus/internal/stream"
 	"github.com/barnowlsnest/stratus/pkg/client"
