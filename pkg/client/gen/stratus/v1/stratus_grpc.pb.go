@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	StreamService_Write_FullMethodName       = "/stratus.v1.StreamService/Write"
 	StreamService_Read_FullMethodName        = "/stratus.v1.StreamService/Read"
+	StreamService_Truncate_FullMethodName    = "/stratus.v1.StreamService/Truncate"
 	StreamService_GetMetadata_FullMethodName = "/stratus.v1.StreamService/GetMetadata"
 )
 
@@ -35,7 +36,9 @@ type StreamServiceClient interface {
 	Write(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WriteRequest, WriteResponse], error)
 	// Read returns records by id (XREAD) or bounded range (XRANGE).
 	Read(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ReadRequest, ReadResponse], error)
-	// Length returns the current length of the WAL.
+	// Truncate drops all records up to and including up_to.
+	Truncate(ctx context.Context, in *TruncateRequest, opts ...grpc.CallOption) (*TruncateResponse, error)
+	// GetMetadata returns a flat snapshot of the stream's metadata.
 	GetMetadata(ctx context.Context, in *GetMetadataRequest, opts ...grpc.CallOption) (*GetMetadataResponse, error)
 }
 
@@ -73,6 +76,16 @@ func (c *streamServiceClient) Read(ctx context.Context, opts ...grpc.CallOption)
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type StreamService_ReadClient = grpc.BidiStreamingClient[ReadRequest, ReadResponse]
 
+func (c *streamServiceClient) Truncate(ctx context.Context, in *TruncateRequest, opts ...grpc.CallOption) (*TruncateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TruncateResponse)
+	err := c.cc.Invoke(ctx, StreamService_Truncate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *streamServiceClient) GetMetadata(ctx context.Context, in *GetMetadataRequest, opts ...grpc.CallOption) (*GetMetadataResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetMetadataResponse)
@@ -94,7 +107,9 @@ type StreamServiceServer interface {
 	Write(grpc.BidiStreamingServer[WriteRequest, WriteResponse]) error
 	// Read returns records by id (XREAD) or bounded range (XRANGE).
 	Read(grpc.BidiStreamingServer[ReadRequest, ReadResponse]) error
-	// Length returns the current length of the WAL.
+	// Truncate drops all records up to and including up_to.
+	Truncate(context.Context, *TruncateRequest) (*TruncateResponse, error)
+	// GetMetadata returns a flat snapshot of the stream's metadata.
 	GetMetadata(context.Context, *GetMetadataRequest) (*GetMetadataResponse, error)
 	mustEmbedUnimplementedStreamServiceServer()
 }
@@ -111,6 +126,9 @@ func (UnimplementedStreamServiceServer) Write(grpc.BidiStreamingServer[WriteRequ
 }
 func (UnimplementedStreamServiceServer) Read(grpc.BidiStreamingServer[ReadRequest, ReadResponse]) error {
 	return status.Error(codes.Unimplemented, "method Read not implemented")
+}
+func (UnimplementedStreamServiceServer) Truncate(context.Context, *TruncateRequest) (*TruncateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Truncate not implemented")
 }
 func (UnimplementedStreamServiceServer) GetMetadata(context.Context, *GetMetadataRequest) (*GetMetadataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMetadata not implemented")
@@ -150,6 +168,24 @@ func _StreamService_Read_Handler(srv interface{}, stream grpc.ServerStream) erro
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type StreamService_ReadServer = grpc.BidiStreamingServer[ReadRequest, ReadResponse]
 
+func _StreamService_Truncate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TruncateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamServiceServer).Truncate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamService_Truncate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamServiceServer).Truncate(ctx, req.(*TruncateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _StreamService_GetMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetMetadataRequest)
 	if err := dec(in); err != nil {
@@ -175,6 +211,10 @@ var StreamService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "stratus.v1.StreamService",
 	HandlerType: (*StreamServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Truncate",
+			Handler:    _StreamService_Truncate_Handler,
+		},
 		{
 			MethodName: "GetMetadata",
 			Handler:    _StreamService_GetMetadata_Handler,

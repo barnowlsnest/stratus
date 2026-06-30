@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/barnowlsnest/go-configlib/v2 v2.0.0
-	github.com/barnowlsnest/go-datalib/v5 v5.1.0
+	github.com/barnowlsnest/go-datalib/v5 v5.2.0
 	github.com/barnowlsnest/go-logslib/v2 v2.0.0
 	github.com/barnowlsnest/go-wallib v1.2.1
 	github.com/stretchr/testify v1.11.1

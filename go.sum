@@ -1,7 +1,7 @@
 github.com/barnowlsnest/go-configlib/v2 v2.0.0 h1:/iEdDiib57euVdNK01GSQBa/Ly2tmdpNC8lc7+7u7Z8=
 github.com/barnowlsnest/go-configlib/v2 v2.0.0/go.mod h1:QNwtyrHCDGHK/kRVxZDJ8YYMJ0rFfc460X+YosvDCSI=
-github.com/barnowlsnest/go-datalib/v5 v5.1.0 h1:mlItQmyLURCCOO3e9QUg2EJdCFuS+P5NrErfzPN0ej4=
-github.com/barnowlsnest/go-datalib/v5 v5.1.0/go.mod h1:gnq7wYLWgvWqgGz138NgXwNEQCNWl9DoXkQYT5xpW80=
+github.com/barnowlsnest/go-datalib/v5 v5.2.0 h1:mx1uhBtnV5wGC1HjLMlF1dO4uudVsZauIlcNj9Ku084=
+github.com/barnowlsnest/go-datalib/v5 v5.2.0/go.mod h1:gnq7wYLWgvWqgGz138NgXwNEQCNWl9DoXkQYT5xpW80=
 github.com/barnowlsnest/go-logslib/v2 v2.0.0 h1:jecd1aQgyIBjIBcH+L7qOBeS5prtSCHMHaklPe7P2d0=
 github.com/barnowlsnest/go-logslib/v2 v2.0.0/go.mod h1:N/GMGArt46ywtKx4n3HIqa+SRmchq9szprG/6+EMKDg=
 github.com/barnowlsnest/go-wallib v1.2.1 h1:reoe12vYkOkWiAo7XI15yZLloMwmdQfPZFsye0oOSkg=

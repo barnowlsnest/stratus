@@ -24,15 +24,17 @@ type (
 
 	// Metadata is a flat snapshot of the stream's preloader and ingester state.
 	Metadata struct {
-		StorageSize     uint64
-		CacheSize       uint64
-		FirstID         uint64
-		LastID          uint64
-		BytesWritten    uint64
-		DuplicatesCount uint64
-		WritesCount     uint64
-		WritesPerSecond float64
-		DurationSeconds float64
+		StorageSize             uint64
+		CacheSize               uint64
+		FirstID                 uint64
+		LastID                  uint64
+		BytesWritten            uint64
+		DuplicatesCount         uint64
+		WritesCount             uint64
+		WritesPerSecond         float64
+		DurationSeconds         float64
+		TruncateClaimsCount     uint64
+		LastTruncateClaimAtUnix int64
 	}
 
 	// Client owns one connection and two long-lived streams. Each stream is
@@ -206,16 +208,33 @@ func (c *Client) GetMetadata(ctx context.Context) (Metadata, error) {
 	}
 
 	return Metadata{
-		StorageSize:     resp.GetStorageSize(),
-		CacheSize:       resp.GetCacheSize(),
-		FirstID:         resp.GetFirstId(),
-		LastID:          resp.GetLastId(),
-		BytesWritten:    resp.GetBytesWritten(),
-		DuplicatesCount: resp.GetDuplicatesCount(),
-		WritesCount:     resp.GetWritesCount(),
-		WritesPerSecond: resp.GetWritesPerSecond(),
-		DurationSeconds: resp.GetDurationSeconds(),
+		StorageSize:             resp.GetStorageSize(),
+		CacheSize:               resp.GetCacheSize(),
+		FirstID:                 resp.GetFirstId(),
+		LastID:                  resp.GetLastId(),
+		BytesWritten:            resp.GetBytesWritten(),
+		DuplicatesCount:         resp.GetDuplicatesCount(),
+		WritesCount:             resp.GetWritesCount(),
+		WritesPerSecond:         resp.GetWritesPerSecond(),
+		DurationSeconds:         resp.GetDurationSeconds(),
+		TruncateClaimsCount:     resp.GetTruncateClaimsCount(),
+		LastTruncateClaimAtUnix: resp.GetLastTruncateClaimAtUnix(),
 	}, nil
+}
+
+// Truncate drops all records up to and including upTo, returning the inclusive
+// LSN range that was dropped.
+func (c *Client) Truncate(ctx context.Context, upTo uint64) (first, last uint64, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
+	}
+
+	resp, err := c.service.Truncate(ctx, &stratusv1.TruncateRequest{UpTo: upTo})
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return resp.GetFirst(), resp.GetLast(), nil
 }
 
 // Close closes the underlying connection (which closes both streams).

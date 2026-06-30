@@ -189,17 +189,37 @@ func (s *Server) GetMetadata(ctx context.Context, _ *stratusv1.GetMetadataReques
 
 	m := s.stream.Metadata()
 
+	var lastTruncateClaimAtUnix int64
+	if t := m.Ingester.LastTruncateClaimAt; !t.IsZero() {
+		lastTruncateClaimAtUnix = t.Unix()
+	}
+
 	return &stratusv1.GetMetadataResponse{
-		StorageSize:     m.Preloader.StorageSize,
-		CacheSize:       m.Preloader.CacheSize,
-		FirstId:         m.Preloader.FirstID,
-		LastId:          m.Preloader.LastID,
-		BytesWritten:    m.Ingester.BytesWritten,
-		DuplicatesCount: m.Ingester.DuplicatesCount,
-		WritesCount:     m.Ingester.WritesCount,
-		WritesPerSecond: m.Ingester.WritesPerSecond,
-		DurationSeconds: m.Ingester.Duration.Seconds(),
+		StorageSize:             m.Preloader.StorageSize,
+		CacheSize:               m.Preloader.CacheSize,
+		FirstId:                 m.Preloader.FirstID,
+		LastId:                  m.Preloader.LastID,
+		BytesWritten:            m.Ingester.BytesWritten,
+		DuplicatesCount:         m.Ingester.DuplicatesCount,
+		WritesCount:             m.Ingester.WritesCount,
+		WritesPerSecond:         m.Ingester.WritesPerSecond,
+		DurationSeconds:         m.Ingester.Duration.Seconds(),
+		TruncateClaimsCount:     m.Ingester.TruncateClaimsCount,
+		LastTruncateClaimAtUnix: lastTruncateClaimAtUnix,
 	}, nil
+}
+
+// Truncate drops all records up to and including up_to, replying with the
+// dropped LSN range.
+func (s *Server) Truncate(ctx context.Context, req *stratusv1.TruncateRequest) (*stratusv1.TruncateResponse, error) {
+	upTo := req.GetUpTo()
+	first := s.stream.Metadata().Preloader.FirstID
+
+	if err := s.stream.Truncate(ctx, upTo); err != nil {
+		return nil, toStatus(err)
+	}
+
+	return &stratusv1.TruncateResponse{First: first, Last: upTo}, nil
 }
 
 func (s *Server) handleRead(ctx context.Context, req *stratusv1.ReadRequest) ([]*stratusv1.Entry, error) {

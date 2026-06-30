@@ -20,11 +20,13 @@ type (
 	}
 
 	Metadata struct {
-		BytesWritten    uint64
-		DuplicatesCount uint64
-		WritesCount     uint64
-		WritesPerSecond float64
-		Duration        time.Duration
+		BytesWritten        uint64
+		DuplicatesCount     uint64
+		WritesCount         uint64
+		TruncateClaimsCount uint64
+		WritesPerSecond     float64
+		Duration            time.Duration
+		LastTruncateClaimAt time.Time
 	}
 
 	Option func(*Ingester)
@@ -75,6 +77,14 @@ func (in *Ingester) Metadata() *Metadata {
 	in.metadata.Duration = time.Since(in.startTime)
 
 	return in.metadata
+}
+
+func (in *Ingester) UpdateMetadataOnTruncateClaim() {
+	in.mux.Lock()
+	defer in.mux.Unlock()
+
+	in.metadata.TruncateClaimsCount++
+	in.metadata.LastTruncateClaimAt = time.Now().UTC()
 }
 
 func (in *Ingester) Write(ctx context.Context, record *storage.Record) (uint64, error) {

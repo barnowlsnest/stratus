@@ -11,7 +11,9 @@ service StreamService {
   rpc Write(stream WriteRequest) returns (stream WriteResponse);
   // Read returns records by id (XREAD) or bounded range (XRANGE).
   rpc Read(stream ReadRequest) returns (stream ReadResponse);
-  // Length returns the current length of the WAL.
+  // Truncate drops all records up to and including up_to.
+  rpc Truncate(TruncateRequest) returns (TruncateResponse);
+  // GetMetadata returns a flat snapshot of the stream's metadata.
   rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse);
 }
 
@@ -57,6 +59,15 @@ message ReadResponse {
   repeated Entry entries = 1;
 }
 
+message TruncateRequest {
+  uint64 up_to = 1; // drop all records up to and including this LSN
+}
+
+message TruncateResponse {
+  uint64 first = 1; // first LSN dropped
+  uint64 last = 2;  // last LSN dropped (== up_to)
+}
+
 message GetMetadataRequest {}
 
 // GetMetadataResponse is a flat view of stream.Metadata: preloader fields
@@ -73,4 +84,6 @@ message GetMetadataResponse {
   uint64 writes_count = 7;
   double writes_per_second = 8;
   double duration_seconds = 9;
+  uint64 truncate_claims_count = 10; // number of Truncate calls
+  int64 last_truncate_claim_at_unix = 11; // unix seconds; 0 if never truncated
 }

@@ -101,3 +101,68 @@ func TestClientRoundTrip(t *testing.T) {
 	_, err = c.Write(ctx, 1, []byte(`{"op":"set","k":"a"}`))
 	require.True(t, client.IsDuplicate(err))
 }
+
+func TestClientTruncate(t *testing.T) {
+	ctx := context.Background()
+	c, err := client.New(ctx, "passthrough:///bufnet",
+		dialOption(t),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	const records = 5
+	for i := range records {
+		_, err := c.Write(ctx, uint64(i+1), []byte(`{"op":"set","k":"v"}`))
+		require.NoError(t, err)
+	}
+
+	first, last, err := c.Truncate(ctx, 3)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), first)
+	require.Equal(t, uint64(3), last)
+
+	// Records beyond the truncation point stay readable.
+	survivor, err := c.Read(ctx, 4)
+	require.NoError(t, err)
+	require.Equal(t, uint64(4), survivor.ID)
+
+	meta, err := c.GetMetadata(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), meta.TruncateClaimsCount)
+	require.Positive(t, meta.LastTruncateClaimAtUnix)
+}
+
+func TestClientGetMetadata(t *testing.T) {
+	ctx := context.Background()
+	c, err := client.New(ctx, "passthrough:///bufnet",
+		dialOption(t),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	single := []byte(`{"op":"set","k":"alpha"}`)
+	_, err = c.Write(ctx, 1, single)
+	require.NoError(t, err)
+
+	batch := []client.Record{
+		{DedupKey: 2, Payload: []byte(`{"op":"set","k":"beta"}`)},
+		{DedupKey: 3, Payload: []byte(`{"op":"set","k":"gamma"}`)},
+	}
+	_, _, err = c.WriteBatch(ctx, batch)
+	require.NoError(t, err)
+
+	actual, err := c.GetMetadata(ctx)
+	require.NoError(t, err)
+
+	expectedBytes := uint64(len(single) + len(batch[0].Payload) + len(batch[1].Payload))
+	require.Equal(t, uint64(3), actual.WritesCount)
+	require.Equal(t, expectedBytes, actual.BytesWritten)
+	require.Zero(t, actual.DuplicatesCount)
+	require.Equal(t, uint64(1), actual.FirstID)
+	require.Equal(t, uint64(3), actual.LastID)
+	require.Equal(t, uint64(3), actual.StorageSize)
+	require.Positive(t, actual.WritesPerSecond)
+	require.Positive(t, actual.DurationSeconds)
+}

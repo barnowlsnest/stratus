@@ -198,6 +198,24 @@ func (cache *Cache) RangeRecords(ctx context.Context, fromID, toID uint64) ([]*s
 	return records, nil
 }
 
+func (cache *Cache) Truncate(ctx context.Context, upTo uint64) error {
+	oldFirst, _ := cache.pre.storage.Boundry()
+	if err := cache.pre.storage.Truncate(ctx, upTo); err != nil {
+		return err
+	}
+
+	// WAL truncation is best-effort segment reclamation: only entries below the
+	// new low-water mark are actually gone, so evict exactly those from the cache.
+	newFirst, _ := cache.pre.storage.Boundry()
+	keys := make([]uint64, 0, newFirst-oldFirst)
+	for id := oldFirst; id < newFirst; id++ {
+		keys = append(keys, id)
+	}
+	cache.pre.lru.Delete(keys...)
+
+	return nil
+}
+
 func (p *Preloader) lazyLoadRecord(ctx context.Context, id uint64) (*storage.Record, error) {
 	record, err := p.lru.Get(id)
 	if err != nil {
