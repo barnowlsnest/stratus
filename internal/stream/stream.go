@@ -22,6 +22,11 @@ type (
 		RawBytes []byte
 	}
 
+	Metadata struct {
+		Preloader *preloader.Metadata
+		Ingester  *ingester.Metadata
+	}
+
 	Option func(*Stream)
 )
 
@@ -65,6 +70,13 @@ func (s *Stream) validate() error {
 		return ErrNilCache
 	default:
 		return nil
+	}
+}
+
+func (s *Stream) Metadata() *Metadata {
+	return &Metadata{
+		Preloader: s.cache.Metadata(),
+		Ingester:  s.ingester.Metadata(),
 	}
 }
 

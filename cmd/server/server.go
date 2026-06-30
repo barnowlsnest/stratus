@@ -178,6 +178,30 @@ func (s *Server) Read(srv stratusv1.StreamService_ReadServer) error {
 	}
 }
 
+// GetMetadata returns a flat snapshot of the stream's preloader and ingester
+// metadata.
+func (s *Server) GetMetadata(ctx context.Context, _ *stratusv1.GetMetadataRequest) (*stratusv1.GetMetadataResponse, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	m := s.stream.Metadata()
+
+	return &stratusv1.GetMetadataResponse{
+		StorageSize:     m.Preloader.StorageSize,
+		CacheSize:       m.Preloader.CacheSize,
+		FirstId:         m.Preloader.FirstID,
+		LastId:          m.Preloader.LastID,
+		BytesWritten:    m.Ingester.BytesWritten,
+		DuplicatesCount: m.Ingester.DuplicatesCount,
+		WritesCount:     m.Ingester.WritesCount,
+		WritesPerSecond: m.Ingester.WritesPerSecond,
+		DurationSeconds: m.Ingester.Duration.Seconds(),
+	}, nil
+}
+
 func (s *Server) handleRead(ctx context.Context, req *stratusv1.ReadRequest) ([]*stratusv1.Entry, error) {
 	switch query := req.GetQuery().(type) {
 	case *stratusv1.ReadRequest_Id:

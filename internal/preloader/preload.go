@@ -28,6 +28,13 @@ type (
 		pre *Preloader
 	}
 
+	Metadata struct {
+		StorageSize uint64
+		CacheSize   uint64
+		FirstID     uint64
+		LastID      uint64
+	}
+
 	Option func(*Preloader)
 )
 
@@ -155,6 +162,18 @@ func (p *Preloader) Cache() (*Cache, error) {
 	}
 
 	return &Cache{pre: p}, nil
+}
+
+func (cache *Cache) Metadata() *Metadata {
+	first, last := cache.pre.storage.Boundry()
+	cacheLen := cache.pre.lru.Len()
+
+	return &Metadata{
+		StorageSize: (last - first) + 1,
+		CacheSize:   uint64(cacheLen),
+		FirstID:     first,
+		LastID:      last,
+	}
 }
 
 func (cache *Cache) GetRecord(ctx context.Context, id uint64) (*storage.Record, error) {

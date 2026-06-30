@@ -22,10 +22,24 @@ type (
 		Payload []byte
 	}
 
+	// Metadata is a flat snapshot of the stream's preloader and ingester state.
+	Metadata struct {
+		StorageSize     uint64
+		CacheSize       uint64
+		FirstID         uint64
+		LastID          uint64
+		BytesWritten    uint64
+		DuplicatesCount uint64
+		WritesCount     uint64
+		WritesPerSecond float64
+		DurationSeconds float64
+	}
+
 	// Client owns one connection and two long-lived streams. Each stream is
 	// serialized by its own mutex (Approach A: one in-flight call per stream).
 	Client struct {
 		conn        *grpc.ClientConn
+		service     stratusv1.StreamServiceClient
 		writeMu     sync.Mutex
 		writeStream stratusv1.StreamService_WriteClient
 		readMu      sync.Mutex
@@ -63,6 +77,7 @@ func New(ctx context.Context, addr string, opts ...grpc.DialOption) (*Client, er
 
 	return &Client{
 		conn:        conn,
+		service:     rpc,
 		writeStream: writeStream,
 		readStream:  readStream,
 	}, nil
@@ -176,6 +191,31 @@ func (c *Client) Range(ctx context.Context, first, last uint64) ([]Entry, error)
 	}
 
 	return entries, nil
+}
+
+// GetMetadata returns a flat snapshot of the stream's preloader and ingester
+// metadata.
+func (c *Client) GetMetadata(ctx context.Context) (Metadata, error) {
+	if err := ctx.Err(); err != nil {
+		return Metadata{}, err
+	}
+
+	resp, err := c.service.GetMetadata(ctx, &stratusv1.GetMetadataRequest{})
+	if err != nil {
+		return Metadata{}, err
+	}
+
+	return Metadata{
+		StorageSize:     resp.GetStorageSize(),
+		CacheSize:       resp.GetCacheSize(),
+		FirstID:         resp.GetFirstId(),
+		LastID:          resp.GetLastId(),
+		BytesWritten:    resp.GetBytesWritten(),
+		DuplicatesCount: resp.GetDuplicatesCount(),
+		WritesCount:     resp.GetWritesCount(),
+		WritesPerSecond: resp.GetWritesPerSecond(),
+		DurationSeconds: resp.GetDurationSeconds(),
+	}, nil
 }
 
 // Close closes the underlying connection (which closes both streams).
