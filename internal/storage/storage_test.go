@@ -101,22 +101,22 @@ func (s *StorageTestSuite) TestWriteBatchExcludesDuplicates() {
 		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)},
 		{DedupKey: 2, Bytes: []byte(`{"op":"set","k":"b"}`)},
 	}
-	_, _, err := s.storage.WriteBatch(ctx, seed)
+	_, err := s.storage.WriteBatch(ctx, seed)
 	s.Require().NoError(err)
 
 	input := []*Record{
 		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)}, // duplicate
 		{DedupKey: 3, Bytes: []byte(`{"op":"set","k":"c"}`)}, // new
 	}
-	actualIDs, actualDups, err := s.storage.WriteBatch(ctx, input)
+	result, err := s.storage.WriteBatch(ctx, input)
 	s.Require().NoError(err)
 
-	expectedDups := 1
+	expectedDups := uint64(1)
 	expectedWritten := 1
-	s.Require().Equal(expectedDups, actualDups)
-	s.Require().Len(actualIDs, expectedWritten)
+	s.Require().Equal(expectedDups, result.DuplicatesCount)
+	s.Require().Len(result.IDs, expectedWritten)
 
-	actual, err := s.storage.Read(ctx, actualIDs[0])
+	actual, err := s.storage.Read(ctx, result.IDs[0])
 	s.Require().NoError(err)
 	expectedPayload := []byte(`{"op":"set","k":"c"}`)
 	s.Require().Equal(expectedPayload, actual.Bytes)
@@ -130,10 +130,11 @@ func (s *StorageTestSuite) TestReadBatchReturnsDistinctPayloads() {
 		{DedupKey: 2, Bytes: []byte(`{"op":"set","k":"b"}`)},
 		{DedupKey: 3, Bytes: []byte(`{"op":"set","k":"c"}`)},
 	}
-	ids, _, err := s.storage.WriteBatch(ctx, input)
+	result, err := s.storage.WriteBatch(ctx, input)
 	s.Require().NoError(err)
-	s.Require().Len(ids, 3)
+	s.Require().Len(result.IDs, 3)
 
+	ids := result.IDs
 	actual, err := s.storage.ReadBatch(ctx, ids[0], ids[len(ids)-1])
 	s.Require().NoError(err)
 	s.Require().Len(actual, 3)
@@ -149,7 +150,7 @@ func (s *StorageTestSuite) newRecord(length int) []byte {
 	s.T().Helper()
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	result := make([]byte, length)
-	for i := 0; i < length; i++ {
+	for i := range length {
 		result[i] = charset[r.Intn(len(charset))]
 	}
 

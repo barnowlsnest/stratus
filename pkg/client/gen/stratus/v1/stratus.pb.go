@@ -481,6 +481,154 @@ func (x *ReadResponse) GetEntries() []*Entry {
 	return nil
 }
 
+type GetMetadataRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMetadataRequest) Reset() {
+	*x = GetMetadataRequest{}
+	mi := &file_stratus_v1_stratus_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMetadataRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMetadataRequest) ProtoMessage() {}
+
+func (x *GetMetadataRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_stratus_v1_stratus_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMetadataRequest.ProtoReflect.Descriptor instead.
+func (*GetMetadataRequest) Descriptor() ([]byte, []int) {
+	return file_stratus_v1_stratus_proto_rawDescGZIP(), []int{8}
+}
+
+// GetMetadataResponse is a flat view of stream.Metadata: preloader fields
+// followed by ingester fields.
+type GetMetadataResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// preloader
+	StorageSize uint64 `protobuf:"varint,1,opt,name=storage_size,json=storageSize,proto3" json:"storage_size,omitempty"`
+	CacheSize   uint64 `protobuf:"varint,2,opt,name=cache_size,json=cacheSize,proto3" json:"cache_size,omitempty"`
+	FirstId     uint64 `protobuf:"varint,3,opt,name=first_id,json=firstId,proto3" json:"first_id,omitempty"`
+	LastId      uint64 `protobuf:"varint,4,opt,name=last_id,json=lastId,proto3" json:"last_id,omitempty"`
+	// ingester
+	BytesWritten    uint64  `protobuf:"varint,5,opt,name=bytes_written,json=bytesWritten,proto3" json:"bytes_written,omitempty"`
+	DuplicatesCount uint64  `protobuf:"varint,6,opt,name=duplicates_count,json=duplicatesCount,proto3" json:"duplicates_count,omitempty"`
+	WritesCount     uint64  `protobuf:"varint,7,opt,name=writes_count,json=writesCount,proto3" json:"writes_count,omitempty"`
+	WritesPerSecond float64 `protobuf:"fixed64,8,opt,name=writes_per_second,json=writesPerSecond,proto3" json:"writes_per_second,omitempty"`
+	DurationSeconds float64 `protobuf:"fixed64,9,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *GetMetadataResponse) Reset() {
+	*x = GetMetadataResponse{}
+	mi := &file_stratus_v1_stratus_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMetadataResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMetadataResponse) ProtoMessage() {}
+
+func (x *GetMetadataResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_stratus_v1_stratus_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMetadataResponse.ProtoReflect.Descriptor instead.
+func (*GetMetadataResponse) Descriptor() ([]byte, []int) {
+	return file_stratus_v1_stratus_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetMetadataResponse) GetStorageSize() uint64 {
+	if x != nil {
+		return x.StorageSize
+	}
+	return 0
+}
+
+func (x *GetMetadataResponse) GetCacheSize() uint64 {
+	if x != nil {
+		return x.CacheSize
+	}
+	return 0
+}
+
+func (x *GetMetadataResponse) GetFirstId() uint64 {
+	if x != nil {
+		return x.FirstId
+	}
+	return 0
+}
+
+func (x *GetMetadataResponse) GetLastId() uint64 {
+	if x != nil {
+		return x.LastId
+	}
+	return 0
+}
+
+func (x *GetMetadataResponse) GetBytesWritten() uint64 {
+	if x != nil {
+		return x.BytesWritten
+	}
+	return 0
+}
+
+func (x *GetMetadataResponse) GetDuplicatesCount() uint64 {
+	if x != nil {
+		return x.DuplicatesCount
+	}
+	return 0
+}
+
+func (x *GetMetadataResponse) GetWritesCount() uint64 {
+	if x != nil {
+		return x.WritesCount
+	}
+	return 0
+}
+
+func (x *GetMetadataResponse) GetWritesPerSecond() float64 {
+	if x != nil {
+		return x.WritesPerSecond
+	}
+	return 0
+}
+
+func (x *GetMetadataResponse) GetDurationSeconds() float64 {
+	if x != nil {
+		return x.DurationSeconds
+	}
+	return 0
+}
+
 var File_stratus_v1_stratus_proto protoreflect.FileDescriptor
 
 const file_stratus_v1_stratus_proto_rawDesc = "" +
@@ -510,10 +658,23 @@ const file_stratus_v1_stratus_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x18\n" +
 	"\apayload\x18\x02 \x01(\fR\apayload\";\n" +
 	"\fReadResponse\x12+\n" +
-	"\aentries\x18\x01 \x03(\v2\x11.stratus.v1.EntryR\aentries2\x90\x01\n" +
+	"\aentries\x18\x01 \x03(\v2\x11.stratus.v1.EntryR\aentries\"\x14\n" +
+	"\x12GetMetadataRequest\"\xd5\x02\n" +
+	"\x13GetMetadataResponse\x12!\n" +
+	"\fstorage_size\x18\x01 \x01(\x04R\vstorageSize\x12\x1d\n" +
+	"\n" +
+	"cache_size\x18\x02 \x01(\x04R\tcacheSize\x12\x19\n" +
+	"\bfirst_id\x18\x03 \x01(\x04R\afirstId\x12\x17\n" +
+	"\alast_id\x18\x04 \x01(\x04R\x06lastId\x12#\n" +
+	"\rbytes_written\x18\x05 \x01(\x04R\fbytesWritten\x12)\n" +
+	"\x10duplicates_count\x18\x06 \x01(\x04R\x0fduplicatesCount\x12!\n" +
+	"\fwrites_count\x18\a \x01(\x04R\vwritesCount\x12*\n" +
+	"\x11writes_per_second\x18\b \x01(\x01R\x0fwritesPerSecond\x12)\n" +
+	"\x10duration_seconds\x18\t \x01(\x01R\x0fdurationSeconds2\xe0\x01\n" +
 	"\rStreamService\x12@\n" +
 	"\x05Write\x12\x18.stratus.v1.WriteRequest\x1a\x19.stratus.v1.WriteResponse(\x010\x01\x12=\n" +
-	"\x04Read\x12\x17.stratus.v1.ReadRequest\x1a\x18.stratus.v1.ReadResponse(\x010\x01BEZCgithub.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1;stratusv1b\x06proto3"
+	"\x04Read\x12\x17.stratus.v1.ReadRequest\x1a\x18.stratus.v1.ReadResponse(\x010\x01\x12N\n" +
+	"\vGetMetadata\x12\x1e.stratus.v1.GetMetadataRequest\x1a\x1f.stratus.v1.GetMetadataResponseBEZCgithub.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1;stratusv1b\x06proto3"
 
 var (
 	file_stratus_v1_stratus_proto_rawDescOnce sync.Once
@@ -527,16 +688,18 @@ func file_stratus_v1_stratus_proto_rawDescGZIP() []byte {
 	return file_stratus_v1_stratus_proto_rawDescData
 }
 
-var file_stratus_v1_stratus_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_stratus_v1_stratus_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_stratus_v1_stratus_proto_goTypes = []any{
-	(*Record)(nil),        // 0: stratus.v1.Record
-	(*RecordBatch)(nil),   // 1: stratus.v1.RecordBatch
-	(*WriteRequest)(nil),  // 2: stratus.v1.WriteRequest
-	(*WriteResponse)(nil), // 3: stratus.v1.WriteResponse
-	(*Range)(nil),         // 4: stratus.v1.Range
-	(*ReadRequest)(nil),   // 5: stratus.v1.ReadRequest
-	(*Entry)(nil),         // 6: stratus.v1.Entry
-	(*ReadResponse)(nil),  // 7: stratus.v1.ReadResponse
+	(*Record)(nil),              // 0: stratus.v1.Record
+	(*RecordBatch)(nil),         // 1: stratus.v1.RecordBatch
+	(*WriteRequest)(nil),        // 2: stratus.v1.WriteRequest
+	(*WriteResponse)(nil),       // 3: stratus.v1.WriteResponse
+	(*Range)(nil),               // 4: stratus.v1.Range
+	(*ReadRequest)(nil),         // 5: stratus.v1.ReadRequest
+	(*Entry)(nil),               // 6: stratus.v1.Entry
+	(*ReadResponse)(nil),        // 7: stratus.v1.ReadResponse
+	(*GetMetadataRequest)(nil),  // 8: stratus.v1.GetMetadataRequest
+	(*GetMetadataResponse)(nil), // 9: stratus.v1.GetMetadataResponse
 }
 var file_stratus_v1_stratus_proto_depIdxs = []int32{
 	0, // 0: stratus.v1.RecordBatch.records:type_name -> stratus.v1.Record
@@ -546,10 +709,12 @@ var file_stratus_v1_stratus_proto_depIdxs = []int32{
 	6, // 4: stratus.v1.ReadResponse.entries:type_name -> stratus.v1.Entry
 	2, // 5: stratus.v1.StreamService.Write:input_type -> stratus.v1.WriteRequest
 	5, // 6: stratus.v1.StreamService.Read:input_type -> stratus.v1.ReadRequest
-	3, // 7: stratus.v1.StreamService.Write:output_type -> stratus.v1.WriteResponse
-	7, // 8: stratus.v1.StreamService.Read:output_type -> stratus.v1.ReadResponse
-	7, // [7:9] is the sub-list for method output_type
-	5, // [5:7] is the sub-list for method input_type
+	8, // 7: stratus.v1.StreamService.GetMetadata:input_type -> stratus.v1.GetMetadataRequest
+	3, // 8: stratus.v1.StreamService.Write:output_type -> stratus.v1.WriteResponse
+	7, // 9: stratus.v1.StreamService.Read:output_type -> stratus.v1.ReadResponse
+	9, // 10: stratus.v1.StreamService.GetMetadata:output_type -> stratus.v1.GetMetadataResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
 	5, // [5:5] is the sub-list for extension type_name
 	5, // [5:5] is the sub-list for extension extendee
 	0, // [0:5] is the sub-list for field type_name
@@ -574,7 +739,7 @@ func file_stratus_v1_stratus_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_stratus_v1_stratus_proto_rawDesc), len(file_stratus_v1_stratus_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

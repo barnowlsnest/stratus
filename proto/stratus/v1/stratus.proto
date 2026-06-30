@@ -11,6 +11,8 @@ service StreamService {
   rpc Write(stream WriteRequest) returns (stream WriteResponse);
   // Read returns records by id (XREAD) or bounded range (XRANGE).
   rpc Read(stream ReadRequest) returns (stream ReadResponse);
+  // Length returns the current length of the WAL.
+  rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse);
 }
 
 message Record {
@@ -53,4 +55,22 @@ message Entry {
 
 message ReadResponse {
   repeated Entry entries = 1;
+}
+
+message GetMetadataRequest {}
+
+// GetMetadataResponse is a flat view of stream.Metadata: preloader fields
+// followed by ingester fields.
+message GetMetadataResponse {
+  // preloader
+  uint64 storage_size = 1;
+  uint64 cache_size = 2;
+  uint64 first_id = 3;
+  uint64 last_id = 4;
+  // ingester
+  uint64 bytes_written = 5;
+  uint64 duplicates_count = 6;
+  uint64 writes_count = 7;
+  double writes_per_second = 8;
+  double duration_seconds = 9;
 }
