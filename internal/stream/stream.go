@@ -142,8 +142,8 @@ func (s *Stream) Range(ctx context.Context, first, last uint64) ([]*Item, error)
 	return items, nil
 }
 
-func (s *Stream) Truncate(ctx context.Context, upTo uint64) error {
-	if err := s.cache.Truncate(ctx, upTo); err != nil {
+func (s *Stream) Cut(ctx context.Context, upTo uint64) error {
+	if err := s.cache.Delete(ctx, upTo); err != nil {
 		return err
 	}
 

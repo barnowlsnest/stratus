@@ -198,9 +198,9 @@ func (cache *Cache) RangeRecords(ctx context.Context, fromID, toID uint64) ([]*s
 	return records, nil
 }
 
-func (cache *Cache) Truncate(ctx context.Context, upTo uint64) error {
+func (cache *Cache) Delete(ctx context.Context, upTo uint64) error {
 	oldFirst, _ := cache.pre.storage.Boundry()
-	if err := cache.pre.storage.Truncate(ctx, upTo); err != nil {
+	if err := cache.pre.storage.Cut(ctx, upTo); err != nil {
 		return err
 	}
 

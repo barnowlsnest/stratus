@@ -215,7 +215,7 @@ func (s *Server) Truncate(ctx context.Context, req *stratusv1.TruncateRequest) (
 	upTo := req.GetUpTo()
 	first := s.stream.Metadata().Preloader.FirstID
 
-	if err := s.stream.Truncate(ctx, upTo); err != nil {
+	if err := s.stream.Cut(ctx, upTo); err != nil {
 		return nil, toStatus(err)
 	}
 

@@ -4,8 +4,8 @@ github.com/barnowlsnest/go-datalib/v5 v5.2.0 h1:mx1uhBtnV5wGC1HjLMlF1dO4uudVsZau
 github.com/barnowlsnest/go-datalib/v5 v5.2.0/go.mod h1:gnq7wYLWgvWqgGz138NgXwNEQCNWl9DoXkQYT5xpW80=
 github.com/barnowlsnest/go-logslib/v2 v2.0.0 h1:jecd1aQgyIBjIBcH+L7qOBeS5prtSCHMHaklPe7P2d0=
 github.com/barnowlsnest/go-logslib/v2 v2.0.0/go.mod h1:N/GMGArt46ywtKx4n3HIqa+SRmchq9szprG/6+EMKDg=
-github.com/barnowlsnest/go-wallib v1.2.1 h1:reoe12vYkOkWiAo7XI15yZLloMwmdQfPZFsye0oOSkg=
-github.com/barnowlsnest/go-wallib v1.2.1/go.mod h1:zs1PiYT3W1LLdu6MVSd7ZTjf6NcikySzV8SBU8PutHI=
+github.com/barnowlsnest/go-wallib v1.3.2 h1:EVljoijrKavej+kNPzRtgFRmwJLgtleRuwiCS6DMong=
+github.com/barnowlsnest/go-wallib v1.3.2/go.mod h1:zs1PiYT3W1LLdu6MVSd7ZTjf6NcikySzV8SBU8PutHI=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

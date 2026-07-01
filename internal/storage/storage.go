@@ -268,7 +268,7 @@ func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Record
 	return batch, nil
 }
 
-func (s *Storage) Truncate(ctx context.Context, toID uint64) error {
+func (s *Storage) Cut(ctx context.Context, toID uint64) error {
 	if toID == 0 {
 		toID = s.wal.LastLSN()
 	}
@@ -276,7 +276,7 @@ func (s *Storage) Truncate(ctx context.Context, toID uint64) error {
 		return ErrOutOfBounds
 	}
 
-	return s.wal.TruncateContext(ctx, toID)
+	return s.wal.CutOffsetContext(ctx, toID)
 }
 
 func (s *Storage) Subscribe(ctx context.Context, fromID uint64, buffer int) (records <-chan *Record, err error) {
