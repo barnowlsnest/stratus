@@ -6,7 +6,7 @@ import (
 	"io"
 	"net"
 	"time"
-	
+
 	"github.com/barnowlsnest/stratus/internal/stream"
 	stratusv1 "github.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1"
 	"google.golang.org/grpc"
@@ -24,7 +24,7 @@ type (
 		addr          string
 		shutdownGrace time.Duration
 	}
-	
+
 	// Option configures a Server in New.
 	Option func(*Server)
 )
@@ -57,11 +57,11 @@ func New(opts ...Option) (*Server, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
-	
+
 	if s.stream == nil {
 		return nil, ErrNilStream
 	}
-	
+
 	return s, nil
 }
 
@@ -76,20 +76,20 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.addr == "" {
 		return ErrNoAddr
 	}
-	
+
 	lis, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return err
 	}
-	
+
 	g := grpc.NewServer()
 	s.Register(g)
-	
+
 	go func() {
 		<-ctx.Done()
 		s.stop(g)
 	}()
-	
+
 	return g.Serve(lis)
 }
 
@@ -102,10 +102,10 @@ func (s *Server) stop(g *grpc.Server) {
 		g.GracefulStop()
 		close(stopped)
 	}()
-	
+
 	timer := time.NewTimer(s.shutdownGrace)
 	defer timer.Stop()
-	
+
 	select {
 	case <-stopped:
 	case <-timer.C:
@@ -117,7 +117,7 @@ func (s *Server) stop(g *grpc.Server) {
 // attached, or nil when the error is fatal and must terminate the RPC.
 func (s *Server) inStreamError(err error) *stratusv1.Error {
 	metadata := s.stream.Metadata()
-	
+
 	return toError(err, metadata.Preloader.FirstID, metadata.Preloader.LastID)
 }
 
@@ -131,11 +131,11 @@ func (s *Server) Write(srv stratusv1.StreamService_WriteServer) error {
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
-		
+
 		if err != nil {
 			return err
 		}
-		
+
 		response := &stratusv1.WriteResponse{}
 		start, end, err := s.handleWrite(ctx, req)
 		switch streamErr := s.inStreamError(err); {
@@ -146,7 +146,7 @@ func (s *Server) Write(srv stratusv1.StreamService_WriteServer) error {
 		default:
 			response.Error = streamErr
 		}
-		
+
 		if err := srv.Send(response); err != nil {
 			return err
 		}
@@ -163,7 +163,7 @@ func (s *Server) handleWrite(ctx context.Context, req *stratusv1.WriteRequest) (
 		for i, r := range records {
 			items[i] = stream.NewItem(r.GetDedupKey(), r.GetPayload())
 		}
-		
+
 		return s.stream.AddN(ctx, items...)
 	default:
 		return 0, 0, ErrEmptyWriteRequest
@@ -180,11 +180,11 @@ func (s *Server) Read(srv stratusv1.StreamService_ReadServer) error {
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
-		
+
 		if err != nil {
 			return err
 		}
-		
+
 		response := &stratusv1.ReadResponse{}
 		entries, err := s.handleRead(ctx, req)
 		switch streamErr := s.inStreamError(err); {
@@ -195,7 +195,7 @@ func (s *Server) Read(srv stratusv1.StreamService_ReadServer) error {
 		default:
 			response.Error = streamErr
 		}
-		
+
 		if err := srv.Send(response); err != nil {
 			return err
 		}
@@ -210,14 +210,14 @@ func (s *Server) GetMetadata(ctx context.Context, _ *stratusv1.GetMetadataReques
 		return nil, ctx.Err()
 	default:
 	}
-	
+
 	m := s.stream.Metadata()
-	
+
 	var lastTruncateClaimAtUnix int64
 	if t := m.Ingester.LastTruncateClaimAt; !t.IsZero() {
 		lastTruncateClaimAtUnix = t.Unix()
 	}
-	
+
 	return &stratusv1.GetMetadataResponse{
 		StorageSize:             m.Preloader.StorageSize,
 		CacheSize:               m.Preloader.CacheSize,
@@ -238,11 +238,11 @@ func (s *Server) GetMetadata(ctx context.Context, _ *stratusv1.GetMetadataReques
 func (s *Server) CutOffset(ctx context.Context, req *stratusv1.CutOffsetRequest) (*stratusv1.CutOffsetResponse, error) {
 	upTo := req.GetUpTo()
 	first := s.stream.Metadata().Preloader.FirstID
-	
+
 	if err := s.stream.Cut(ctx, upTo); err != nil {
 		return nil, toStatus(err)
 	}
-	
+
 	return &stratusv1.CutOffsetResponse{First: first, Last: upTo}, nil
 }
 
@@ -250,7 +250,7 @@ func (s *Server) UpdateCache(ctx context.Context, req *stratusv1.UpdateCacheRequ
 	if err := s.stream.UpdateCache(ctx, req.First, req.Last); err != nil {
 		return nil, toStatus(err)
 	}
-	
+
 	return &stratusv1.UpdateCacheResponse{}, nil
 }
 
@@ -261,19 +261,19 @@ func (s *Server) handleRead(ctx context.Context, req *stratusv1.ReadRequest) ([]
 		if err != nil {
 			return nil, err
 		}
-		
+
 		return []*stratusv1.Entry{{Id: item.ID, Payload: item.RawBytes}}, nil
 	case *stratusv1.ReadRequest_Range:
 		items, err := s.stream.Range(ctx, query.Range.GetFirst(), query.Range.GetLast())
 		if err != nil {
 			return nil, err
 		}
-		
+
 		entries := make([]*stratusv1.Entry, len(items))
 		for i, item := range items {
 			entries[i] = &stratusv1.Entry{Id: item.ID, Payload: item.RawBytes}
 		}
-		
+
 		return entries, nil
 	default:
 		return nil, ErrEmptyReadRequest

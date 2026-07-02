@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	
+
 	"github.com/barnowlsnest/go-configlib/v2/pkg/configs"
 	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
 	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
@@ -39,22 +39,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to resolve config: %v", err)
 	}
-	
+
 	w, r, err := wal.Open(cfg.WALDir,
 		wal.WithBatchSize(8),
 	)
 	if err != nil {
 		log.Fatalf("failed to open WAL: %v", err)
 	}
-	
+
 	sharedlog.Info("wal opened",
 		sharedlog.F("bytesTruncated", r.BytesTruncated),
 		sharedlog.F("segmentsRemoved", r.SegmentsRemoved),
 	)
-	
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	
+
 	d := dedup.New(cfg.DedupTTL)
 	store, err := storage.New(
 		storage.WithWAL(w),
@@ -65,13 +65,13 @@ func main() {
 		_ = w.Close()
 		log.Fatalf("failed to create storage: %v", err)
 	}
-	
+
 	in, err := ingester.New(ingester.WithStorage(store))
 	if err != nil {
 		_ = w.Close()
 		log.Fatalf("failed to create ingester: %v", err)
 	}
-	
+
 	pre, err := preloader.New(
 		preloader.WithStorage(store),
 		preloader.WithCache(lru.New[storage.Record](cfg.CacheSize)),
@@ -80,30 +80,30 @@ func main() {
 		_ = w.Close()
 		log.Fatalf("failed to create preloader: %v", err)
 	}
-	
+
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		if err := pre.Start(gCtx, r.FirstLSN, r.LastLSN); err != nil {
 			sharedlog.Error(err, sharedlog.F("reason", "preloader start failed"))
 			return err
 		}
-		
+
 		return nil
 	})
-	
+
 	if err := pre.WaitStarted(gCtx, preCacheStartTimeout); err != nil {
 		stop()
 		_ = w.Close()
 		log.Fatalf("preloader did not start: %v", err)
 	}
-	
+
 	cache, err := pre.Cache()
 	if err != nil {
 		stop()
 		_ = w.Close()
 		log.Fatalf("failed to create cache: %v", err)
 	}
-	
+
 	str, err := stream.New(
 		stream.WithIngester(in),
 		stream.WithCache(cache),
@@ -113,7 +113,7 @@ func main() {
 		_ = w.Close()
 		log.Fatalf("failed to create stream: %v", err)
 	}
-	
+
 	srv, err := server.New(
 		server.WithStream(str),
 		server.WithAddr(fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)),
@@ -123,22 +123,22 @@ func main() {
 		_ = w.Close()
 		log.Fatalf("failed to create server: %v", err)
 	}
-	
+
 	g.Go(func() error {
 		if err := srv.Run(gCtx); err != nil {
 			sharedlog.Error(err, sharedlog.F("reason", "server run failed"))
 			return err
 		}
-		
+
 		return nil
 	})
-	
+
 	if err := g.Wait(); err != nil {
 		sharedlog.Error(err, sharedlog.F("reason", "unexpected failure"))
 	}
-	
+
 	sharedlog.Info("shutting down server")
-	
+
 	pre.Stop()
 	_ = w.Close()
 }

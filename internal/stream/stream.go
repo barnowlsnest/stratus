@@ -2,7 +2,7 @@ package stream
 
 import (
 	"context"
-	
+
 	"github.com/barnowlsnest/stratus/internal/ingester"
 	"github.com/barnowlsnest/stratus/internal/preloader"
 	"github.com/barnowlsnest/stratus/internal/storage"
@@ -13,7 +13,7 @@ type (
 		ingester *ingester.Ingester
 		cache    *preloader.Cache
 	}
-	
+
 	// Item is a single stream entry.
 	Item struct {
 		// ID is the LSN assigned by the WAL. Zero on the write path; populated on reads.
@@ -21,12 +21,12 @@ type (
 		DedupKey uint64
 		RawBytes []byte
 	}
-	
+
 	Metadata struct {
 		Preloader *preloader.Metadata
 		Ingester  *ingester.Metadata
 	}
-	
+
 	Option func(*Stream)
 )
 
@@ -54,11 +54,11 @@ func New(opts ...Option) (*Stream, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
-	
+
 	if err := s.validate(); err != nil {
 		return nil, err
 	}
-	
+
 	return s, nil
 }
 
@@ -85,12 +85,12 @@ func (s *Stream) Add(ctx context.Context, item *Item) (first, last uint64, err e
 		DedupKey: item.DedupKey,
 		Bytes:    item.RawBytes,
 	}
-	
+
 	id, err := s.ingester.Write(ctx, record)
 	if err != nil {
 		return 0, 0, err
 	}
-	
+
 	return id, id, nil
 }
 
@@ -102,12 +102,12 @@ func (s *Stream) AddN(ctx context.Context, items ...*Item) (first, last uint64, 
 			Bytes:    item.RawBytes,
 		}
 	}
-	
+
 	ids, err := s.ingester.WriteBatch(ctx, records)
 	if err != nil {
 		return 0, 0, err
 	}
-	
+
 	return ids[0], ids[len(ids)-1], nil
 }
 
@@ -116,7 +116,7 @@ func (s *Stream) Read(ctx context.Context, id uint64) (*Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &Item{
 		ID:       r.DedupKey,
 		DedupKey: r.DedupKey,
@@ -129,7 +129,7 @@ func (s *Stream) Range(ctx context.Context, first, last uint64) ([]*Item, error)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	items := make([]*Item, len(records))
 	for i, record := range records {
 		items[i] = &Item{
@@ -138,7 +138,7 @@ func (s *Stream) Range(ctx context.Context, first, last uint64) ([]*Item, error)
 			RawBytes: record.Bytes,
 		}
 	}
-	
+
 	return items, nil
 }
 
@@ -146,9 +146,9 @@ func (s *Stream) Cut(ctx context.Context, upTo uint64) error {
 	if err := s.cache.Delete(ctx, upTo); err != nil {
 		return err
 	}
-	
+
 	s.ingester.UpdateMetadataOnTruncateClaim()
-	
+
 	return nil
 }
 

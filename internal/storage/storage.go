@@ -5,7 +5,7 @@ import (
 	"context"
 	"io"
 	"sync"
-	
+
 	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
 	"github.com/barnowlsnest/stratus/internal/dedup"
@@ -18,21 +18,21 @@ type (
 		DedupKey uint64
 		Bytes    []byte
 	}
-	
+
 	Storage struct {
 		maxReadBatchSize int
 		wal              *wal.WAL
 		dup              *dedup.Deduplicator
 		subsWG           sync.WaitGroup
 	}
-	
+
 	BatchWriteResult struct {
 		DuplicatesCount uint64
 		WrittenCount    uint64
 		WrittenBytes    uint64
 		IDs             []uint64
 	}
-	
+
 	Option func(*Storage)
 )
 
@@ -59,13 +59,13 @@ func New(opts ...Option) (*Storage, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
-	
+
 	if err := s.validate(); err != nil {
 		return nil, err
 	}
-	
+
 	s.applyDefaults()
-	
+
 	return s, nil
 }
 
@@ -112,7 +112,7 @@ func (s *Storage) validateRange(fromID, toID uint64) error {
 	case s.wal.FirstLSN() > toID:
 		return ErrOutOfBounds
 	}
-	
+
 	return nil
 }
 
@@ -124,16 +124,16 @@ func (s *Storage) Write(ctx context.Context, record *Record) (uint64, error) {
 	if err := record.validate(); err != nil {
 		return 0, err
 	}
-	
+
 	if err := s.dup.Try(record.DedupKey); err != nil {
 		return 0, err
 	}
-	
+
 	id, err := s.wal.Append(ctx, record.Bytes)
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return id, nil
 }
 
@@ -141,7 +141,7 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 	if len(records) == 0 {
 		return nil, ErrEmptyRecord
 	}
-	
+
 	dupMap := make(map[uint64][]*Record)
 	var written uint64
 	batch := make([][]byte, 0, len(records))
@@ -151,34 +151,34 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 			return nil, ctx.Err()
 		default:
 		}
-		
+
 		if err := record.validate(); err != nil {
 			return nil, err
 		}
-		
+
 		if err := s.dup.Try(record.DedupKey); err != nil {
 			dupRecords, exists := dupMap[record.DedupKey]
 			if !exists {
 				dupRecords = make([]*Record, 0, len(records))
 			}
 			dupMap[record.DedupKey] = append(dupRecords, record)
-			
+
 			continue
 		}
-		
+
 		batch = append(batch, record.Bytes)
 		written += uint64(len(record.Bytes))
 	}
-	
+
 	if len(batch) == 0 {
 		return nil, nil
 	}
-	
+
 	ids, err := s.wal.AppendBatch(ctx, batch)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &BatchWriteResult{
 		IDs:             ids,
 		DuplicatesCount: uint64(len(dupMap)),
@@ -191,33 +191,33 @@ func (s *Storage) Read(ctx context.Context, atID uint64) (*Record, error) {
 	if err := s.validateRange(atID, atID); err != nil {
 		return nil, err
 	}
-	
+
 	reader, err := s.wal.NewReader(atID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = reader.Close() }()
-	
+
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
-	
+
 	if ok := reader.Next(); !ok {
 		return nil, io.EOF
 	}
-	
+
 	entry, err := reader.Entry(), reader.Err()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	chunk := &Record{
 		DedupKey: atID,
 		Bytes:    bytes.Clone(entry.Payload),
 	}
-	
+
 	return chunk, nil
 }
 
@@ -225,13 +225,13 @@ func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Record
 	if err := s.validateRange(fromID, toID); err != nil {
 		return nil, err
 	}
-	
+
 	reader, err := s.wal.NewReader(fromID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = reader.Close() }()
-	
+
 	batch := make([]*Record, 0, toID-fromID+1)
 	for reader.Next() {
 		select {
@@ -239,24 +239,24 @@ func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Record
 			return nil, ctx.Err()
 		default:
 		}
-		
+
 		entry, err := reader.Entry(), reader.Err()
 		if err != nil {
 			return nil, err
 		}
-		
+
 		if entry.LSN > toID {
 			break
 		}
-		
+
 		chunk := &Record{
 			DedupKey: entry.LSN,
 			Bytes:    bytes.Clone(entry.Payload),
 		}
-		
+
 		batch = append(batch, chunk)
 	}
-	
+
 	return batch, nil
 }
 
@@ -267,7 +267,7 @@ func (s *Storage) Cut(ctx context.Context, toID uint64) error {
 	if s.wal.FirstLSN() > toID {
 		return ErrOutOfBounds
 	}
-	
+
 	return s.wal.CutOffsetContext(ctx, toID)
 }
 
@@ -275,21 +275,21 @@ func (s *Storage) Subscribe(ctx context.Context, fromID uint64, buffer int) (rec
 	if buffer <= 0 {
 		buffer = 1
 	}
-	
+
 	f, err := s.wal.Follower(fromID, wal.WithFollow())
 	if err != nil {
 		closedCh := make(chan *Record)
 		close(closedCh)
 		return closedCh, err
 	}
-	
+
 	recordsCh := make(chan *Record, buffer)
 	s.subsWG.Go(func() {
 		defer close(recordsCh)
 		for entry := range f.RecordsChan(ctx) {
 			recordsCh <- &Record{DedupKey: entry.LSN, Bytes: bytes.Clone(entry.Payload)}
 		}
-		
+
 		if errClose := f.Close(); errClose != nil {
 			sharedlog.Error(errClose)
 		}
@@ -297,7 +297,7 @@ func (s *Storage) Subscribe(ctx context.Context, fromID uint64, buffer int) (rec
 			sharedlog.Error(errFollower)
 		}
 	})
-	
+
 	return recordsCh, nil
 }
 
