@@ -2,11 +2,13 @@ package ingester
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
-
+	
 	"github.com/barnowlsnest/go-logslib/v2/pkg/logger"
 	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
+	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/barnowlsnest/stratus/internal/storage"
 )
 
@@ -18,7 +20,7 @@ type (
 		storage   *storage.Storage
 		logger    *logger.Logger
 	}
-
+	
 	Metadata struct {
 		BytesWritten        uint64
 		DuplicatesCount     uint64
@@ -28,7 +30,7 @@ type (
 		Duration            time.Duration
 		LastTruncateClaimAt time.Time
 	}
-
+	
 	Option func(*Ingester)
 )
 
@@ -38,15 +40,15 @@ func New(opts ...Option) (*Ingester, error) {
 		logger:    sharedlog.Logger(),
 		metadata:  &Metadata{},
 	}
-
+	
 	for _, opt := range opts {
 		opt(i)
 	}
-
+	
 	if err := i.validate(); err != nil {
 		return nil, err
 	}
-
+	
 	return i, nil
 }
 
@@ -75,14 +77,14 @@ func (in *Ingester) Metadata() *Metadata {
 	in.mux.Lock()
 	defer in.mux.Unlock()
 	in.metadata.Duration = time.Since(in.startTime)
-
+	
 	return in.metadata
 }
 
 func (in *Ingester) UpdateMetadataOnTruncateClaim() {
 	in.mux.Lock()
 	defer in.mux.Unlock()
-
+	
 	in.metadata.TruncateClaimsCount++
 	in.metadata.LastTruncateClaimAt = time.Now().UTC()
 }
@@ -90,17 +92,25 @@ func (in *Ingester) UpdateMetadataOnTruncateClaim() {
 func (in *Ingester) Write(ctx context.Context, record *storage.Record) (uint64, error) {
 	id, err := in.storage.Write(ctx, record)
 	if err != nil {
-		in.logger.Error("failed to write record", sharedlog.F("error", err))
-		return 0, err
+		in.logger.Error("failed to write record", sharedlog.F("error", err.Error()))
+		switch {
+		case errors.Is(err, dedup.ErrDuplicateChunk):
+			in.mux.Lock()
+			defer in.mux.Unlock()
+			in.metadata.DuplicatesCount++
+			return 0, err
+		default:
+			return 0, err
+		}
 	}
-
+	
 	in.mux.Lock()
 	defer in.mux.Unlock()
-
+	
 	in.metadata.WritesCount++
 	in.metadata.BytesWritten += uint64(len(record.Bytes))
 	in.metadata.WritesPerSecond = float64(in.metadata.WritesCount) / time.Since(in.startTime).Seconds()
-
+	
 	return id, nil
 }
 
@@ -110,28 +120,28 @@ func (in *Ingester) WriteBatch(ctx context.Context, records []*storage.Record) (
 		in.logger.Error("failed to write batch", sharedlog.F("error", err))
 		return nil, err
 	}
-
+	
 	if res.DuplicatesCount > 0 {
 		in.logger.Debug("found duplicates in batch", sharedlog.F("skipped", res.DuplicatesCount))
 	}
-
+	
 	if res.DuplicatesCount == uint64(len(records)) {
 		in.logger.Error("all records in batch were duplicates, nothing written")
 		return nil, ErrAllSkipped
 	}
-
+	
 	var written uint64
 	for _, record := range records {
 		written += uint64(len(record.Bytes))
 	}
-
+	
 	in.mux.Lock()
 	defer in.mux.Unlock()
-
+	
 	in.metadata.DuplicatesCount += res.DuplicatesCount
 	in.metadata.BytesWritten += res.WrittenBytes
 	in.metadata.WritesCount += res.WrittenCount
 	in.metadata.WritesPerSecond = float64(in.metadata.WritesCount) / time.Since(in.startTime).Seconds()
-
+	
 	return res.IDs, err
 }
