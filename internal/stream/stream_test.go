@@ -108,6 +108,27 @@ func (s *StreamTestSuite) TestAddReturnsSingleIDAsRange() {
 	s.Require().Equal(last, actual.ID)
 }
 
+// TestAddNAllDuplicatesWithRepeatedKeyReturnsAllSkipped guards against the
+// repeated-key variant: a batch whose records are all duplicates of a single
+// key already within the dedup TTL must fail with ErrAllSkipped, not panic on
+// an empty id slice.
+func (s *StreamTestSuite) TestAddNAllDuplicatesWithRepeatedKeyReturnsAllSkipped() {
+	stream, err := s.newStream()
+	s.Require().NoError(err)
+
+	ctx := context.Background()
+
+	_, _, err = stream.Add(ctx, NewItem(301, []byte(`{"op":"set","k":"a"}`)))
+	s.Require().NoError(err)
+
+	input := []*Item{
+		NewItem(301, []byte(`{"op":"set","k":"a"}`)),
+		NewItem(301, []byte(`{"op":"set","k":"a"}`)),
+	}
+	_, _, err = stream.AddN(ctx, input...)
+	s.Require().ErrorIs(err, ingester.ErrAllSkipped)
+}
+
 func (s *StreamTestSuite) TestAddNReturnsBatchRange() {
 	stream, err := s.newStream()
 	s.Require().NoError(err)

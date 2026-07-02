@@ -106,6 +106,10 @@ func (c *Client) Write(ctx context.Context, dedupKey uint64, payload []byte) (ui
 		return 0, err
 	}
 
+	if pbErr := resp.GetError(); pbErr != nil {
+		return 0, newError(pbErr)
+	}
+
 	return resp.GetStart(), nil
 }
 
@@ -135,6 +139,10 @@ func (c *Client) WriteBatch(ctx context.Context, records []Record) (first, last 
 		return 0, 0, err
 	}
 
+	if pbErr := resp.GetError(); pbErr != nil {
+		return 0, 0, newError(pbErr)
+	}
+
 	return resp.GetStart(), resp.GetEnd(), nil
 }
 
@@ -155,6 +163,10 @@ func (c *Client) Read(ctx context.Context, id uint64) (Entry, error) {
 	resp, err := c.readStream.Recv()
 	if err != nil {
 		return Entry{}, err
+	}
+
+	if pbErr := resp.GetError(); pbErr != nil {
+		return Entry{}, newError(pbErr)
 	}
 
 	if len(resp.GetEntries()) == 0 {
@@ -185,6 +197,10 @@ func (c *Client) Range(ctx context.Context, first, last uint64) ([]Entry, error)
 	resp, err := c.readStream.Recv()
 	if err != nil {
 		return nil, err
+	}
+
+	if pbErr := resp.GetError(); pbErr != nil {
+		return nil, newError(pbErr)
 	}
 
 	entries := make([]Entry, len(resp.GetEntries()))
@@ -222,14 +238,15 @@ func (c *Client) GetMetadata(ctx context.Context) (Metadata, error) {
 	}, nil
 }
 
-// Truncate drops all records up to and including upTo, returning the inclusive
-// LSN range that was dropped.
+// Truncate requests removal of all records up to and including upTo, returning
+// the inclusive LSN range requested; WAL reclamation is segment-based and
+// best-effort, so some ids at or below upTo may remain readable.
 func (c *Client) Truncate(ctx context.Context, upTo uint64) (first, last uint64, err error) {
 	if err := ctx.Err(); err != nil {
 		return 0, 0, err
 	}
 
-	resp, err := c.service.Truncate(ctx, &stratusv1.TruncateRequest{UpTo: upTo})
+	resp, err := c.service.CutOffset(ctx, &stratusv1.CutOffsetRequest{UpTo: upTo})
 	if err != nil {
 		return 0, 0, err
 	}

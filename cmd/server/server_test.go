@@ -152,15 +152,14 @@ func batchReq(records ...*stratusv1.Record) *stratusv1.WriteRequest {
 
 func TestServerWrite(t *testing.T) {
 	tests := []struct {
-		name         string
-		requests     []*stratusv1.WriteRequest // sent in order; assertions use the last response
-		expectedCode codes.Code
-		check        func(t *testing.T, actual *stratusv1.WriteResponse)
+		name        string
+		requests    []*stratusv1.WriteRequest // sent in order; assertions use the last response
+		expectedErr stratusv1.Err             // ERR_UNKNOWN means success expected
+		check       func(t *testing.T, actual *stratusv1.WriteResponse)
 	}{
 		{
-			name:         "single returns start equal end",
-			requests:     []*stratusv1.WriteRequest{recordReq(1, `{"op":"set","k":"a"}`)},
-			expectedCode: codes.OK,
+			name:     "single returns start equal end",
+			requests: []*stratusv1.WriteRequest{recordReq(1, `{"op":"set","k":"a"}`)},
 			check: func(t *testing.T, actual *stratusv1.WriteResponse) {
 				require.Equal(t, actual.GetStart(), actual.GetEnd())
 			},
@@ -172,19 +171,37 @@ func TestServerWrite(t *testing.T) {
 				&stratusv1.Record{DedupKey: 11, Payload: []byte(`{"op":"set","k":"b"}`)},
 				&stratusv1.Record{DedupKey: 12, Payload: []byte(`{"op":"set","k":"c"}`)},
 			)},
-			expectedCode: codes.OK,
 			check: func(t *testing.T, actual *stratusv1.WriteResponse) {
 				expectedSpan := uint64(2)
 				require.Equal(t, expectedSpan, actual.GetEnd()-actual.GetStart())
 			},
 		},
 		{
-			name: "duplicate returns AlreadyExists",
+			name: "duplicate returns in-stream already exists",
 			requests: []*stratusv1.WriteRequest{
 				recordReq(99, `{"op":"set","k":"d"}`),
 				recordReq(99, `{"op":"set","k":"d"}`),
 			},
-			expectedCode: codes.AlreadyExists,
+			expectedErr: stratusv1.Err_ERR_ALREADY_EXISTS,
+		},
+		{
+			name:        "empty request returns in-stream invalid argument",
+			requests:    []*stratusv1.WriteRequest{{}},
+			expectedErr: stratusv1.Err_ERR_INVALID_ARGUMENT,
+		},
+		{
+			name: "all-duplicate batch returns in-stream already exists",
+			requests: []*stratusv1.WriteRequest{
+				batchReq(
+					&stratusv1.Record{DedupKey: 101, Payload: []byte(`{"op":"set","k":"e"}`)},
+					&stratusv1.Record{DedupKey: 102, Payload: []byte(`{"op":"set","k":"f"}`)},
+				),
+				batchReq(
+					&stratusv1.Record{DedupKey: 101, Payload: []byte(`{"op":"set","k":"e"}`)},
+					&stratusv1.Record{DedupKey: 102, Payload: []byte(`{"op":"set","k":"f"}`)},
+				),
+			},
+			expectedErr: stratusv1.Err_ERR_ALREADY_EXISTS,
 		},
 	}
 
@@ -198,14 +215,51 @@ func TestServerWrite(t *testing.T) {
 			for _, req := range tc.requests {
 				require.NoError(t, ws.Send(req))
 				actual, err = ws.Recv()
+				require.NoError(t, err)
 			}
 
-			require.Equal(t, tc.expectedCode, status.Code(err))
-			if tc.check != nil && err == nil {
+			if tc.expectedErr != stratusv1.Err_ERR_UNKNOWN {
+				require.NotNil(t, actual.GetError())
+				require.Equal(t, tc.expectedErr, actual.GetError().GetCode())
+
+				// The stream must survive the error: a fresh unique write succeeds.
+				require.NoError(t, ws.Send(recordReq(1000, `{"op":"set","k":"recovery"}`)))
+				recovered, err := ws.Recv()
+				require.NoError(t, err)
+				require.Nil(t, recovered.GetError())
+
+				return
+			}
+
+			require.Nil(t, actual.GetError())
+			if tc.check != nil {
 				tc.check(t, actual)
 			}
 		})
 	}
+}
+
+// TestServerWriteCancelTerminatesStream verifies the fatal path: cancelling
+// the client's stream context terminates the RPC (as opposed to recoverable
+// errors, which are reported in-stream and keep the RPC alive).
+func TestServerWriteCancelTerminatesStream(t *testing.T) {
+	rpc := newTestClient(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ws, err := rpc.Write(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, ws.Send(recordReq(201, `{"op":"set","k":"a"}`)))
+	actual, err := ws.Recv()
+	require.NoError(t, err)
+	require.Nil(t, actual.GetError())
+
+	cancel()
+
+	_, err = ws.Recv()
+	require.Error(t, err)
+	require.Equal(t, codes.Canceled, status.Code(err))
 }
 
 func TestServerRead(t *testing.T) {
@@ -257,4 +311,58 @@ func TestServerRead(t *testing.T) {
 			require.Equal(t, tc.expectedID, actual.GetEntries()[0].GetId())
 		})
 	}
+}
+
+// TestServerReadInStreamErrors verifies recoverable read failures are reported
+// on the stream (with WAL bounds) and the stream stays usable afterwards.
+func TestServerReadInStreamErrors(t *testing.T) {
+	rpc := newTestClient(t)
+	ctx := context.Background()
+
+	ws, err := rpc.Write(ctx)
+	require.NoError(t, err)
+	require.NoError(t, ws.Send(batchReq(
+		&stratusv1.Record{DedupKey: 31, Payload: []byte(`{"op":"set","k":"a"}`)},
+		&stratusv1.Record{DedupKey: 32, Payload: []byte(`{"op":"set","k":"b"}`)},
+	)))
+	written, err := ws.Recv()
+	require.NoError(t, err)
+
+	rs, err := rpc.Read(ctx)
+	require.NoError(t, err)
+
+	// Range reaching past the last LSN is clamped to the available window and
+	// returns the available entries.
+	require.NoError(t, rs.Send(&stratusv1.ReadRequest{Query: &stratusv1.ReadRequest_Range{
+		Range: &stratusv1.Range{First: written.GetStart(), Last: written.GetEnd() + 100},
+	}}))
+	actual, err := rs.Recv()
+	require.NoError(t, err)
+	require.Nil(t, actual.GetError())
+	require.Len(t, actual.GetEntries(), 2)
+
+	// Range entirely past the last LSN → in-stream OUT_OF_RANGE with bounds.
+	require.NoError(t, rs.Send(&stratusv1.ReadRequest{Query: &stratusv1.ReadRequest_Range{
+		Range: &stratusv1.Range{First: written.GetEnd() + 100, Last: written.GetEnd() + 200},
+	}}))
+	actual, err = rs.Recv()
+	require.NoError(t, err)
+	require.NotNil(t, actual.GetError())
+	require.Equal(t, stratusv1.Err_ERR_OUT_OF_RANGE, actual.GetError().GetCode())
+	require.Equal(t, written.GetStart(), actual.GetError().GetFirstLsn())
+	require.Equal(t, written.GetEnd(), actual.GetError().GetLastLsn())
+
+	// Empty query → in-stream INVALID_ARGUMENT.
+	require.NoError(t, rs.Send(&stratusv1.ReadRequest{}))
+	actual, err = rs.Recv()
+	require.NoError(t, err)
+	require.NotNil(t, actual.GetError())
+	require.Equal(t, stratusv1.Err_ERR_INVALID_ARGUMENT, actual.GetError().GetCode())
+
+	// The same stream still serves a valid query.
+	require.NoError(t, rs.Send(&stratusv1.ReadRequest{Query: &stratusv1.ReadRequest_Id{Id: written.GetStart()}}))
+	actual, err = rs.Recv()
+	require.NoError(t, err)
+	require.Nil(t, actual.GetError())
+	require.Len(t, actual.GetEntries(), 1)
 }

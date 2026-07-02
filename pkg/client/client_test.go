@@ -166,3 +166,70 @@ func TestClientGetMetadata(t *testing.T) {
 	require.Positive(t, actual.WritesPerSecond)
 	require.Positive(t, actual.DurationSeconds)
 }
+
+// TestClientInStreamErrors verifies recoverable failures surface as typed
+// errors carrying WAL bounds, and that both streams survive them.
+func TestClientInStreamErrors(t *testing.T) {
+	ctx := context.Background()
+	c, err := client.New(ctx, "passthrough:///bufnet",
+		dialOption(t),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	first, last, err := c.WriteBatch(ctx, []client.Record{
+		{DedupKey: 41, Payload: []byte(`{"op":"set","k":"a"}`)},
+		{DedupKey: 42, Payload: []byte(`{"op":"set","k":"b"}`)},
+	})
+	require.NoError(t, err)
+
+	// A Range reaching past the tail is clamped to the available window.
+	clamped, err := c.Range(ctx, first, last+100)
+	require.NoError(t, err)
+	require.Len(t, clamped, 2)
+
+	// A Range entirely past the tail → ErrOutOfRange carrying the bounds.
+	_, err = c.Range(ctx, last+100, last+200)
+	require.ErrorIs(t, err, client.ErrOutOfRange)
+
+	var streamErr *client.Error
+	require.ErrorAs(t, err, &streamErr)
+	require.Equal(t, first, streamErr.First)
+	require.Equal(t, last, streamErr.Last)
+
+	// The read stream survives: the same client serves a valid Range.
+	actual, err := c.Range(ctx, first, last)
+	require.NoError(t, err)
+	require.Len(t, actual, 2)
+
+	// Duplicate write → ErrAlreadyExists; write stream survives.
+	_, err = c.Write(ctx, 41, []byte(`{"op":"set","k":"a"}`))
+	require.ErrorIs(t, err, client.ErrAlreadyExists)
+	require.True(t, client.IsDuplicate(err))
+
+	recoveredID, err := c.Write(ctx, 43, []byte(`{"op":"set","k":"c"}`))
+	require.NoError(t, err)
+
+	// Read past the tail → ErrOutOfRange with bounds (LSNs are gapless, so an
+	// id beyond the last LSN is out-of-range, not missing). The recovery write
+	// above advanced the tail, so Last is its LSN.
+	_, err = c.Read(ctx, recoveredID+100)
+	require.ErrorIs(t, err, client.ErrOutOfRange)
+
+	var readErr *client.Error
+	require.ErrorAs(t, err, &readErr)
+	require.Equal(t, first, readErr.First)
+	require.Equal(t, recoveredID, readErr.Last)
+
+	// All-duplicate batch write → ErrAlreadyExists; write stream survives.
+	_, _, err = c.WriteBatch(ctx, []client.Record{
+		{DedupKey: 41, Payload: []byte(`{"op":"set","k":"a"}`)},
+		{DedupKey: 42, Payload: []byte(`{"op":"set","k":"b"}`)},
+	})
+	require.ErrorIs(t, err, client.ErrAlreadyExists)
+	require.True(t, client.IsDuplicate(err))
+
+	_, err = c.Write(ctx, 44, []byte(`{"op":"set","k":"d"}`))
+	require.NoError(t, err)
+}
