@@ -187,12 +187,9 @@ func (cache *Cache) GetRecord(ctx context.Context, id uint64) (*storage.Record, 
 }
 
 func (cache *Cache) RangeRecords(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error) {
-	first, last := cache.pre.storage.Boundry()
-	if fromID == 0 {
-		fromID = first
-	}
-	if toID == 0 {
-		toID = last
+	fromID, toID, err := cache.pre.storage.ClampRange(fromID, toID)
+	if err != nil {
+		return nil, err
 	}
 
 	records := make([]*storage.Record, 0, toID-fromID+1)

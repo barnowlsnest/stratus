@@ -120,6 +120,33 @@ func (s *Storage) Boundry() (first, last uint64) {
 	return s.wal.FirstLSN(), s.wal.LastLSN()
 }
 
+// ClampRange resolves zero sentinels (from == first, to == last) and clamps an
+// overlapping range to the available window. A range that falls entirely
+// outside the window returns ErrOutOfBounds.
+func (s *Storage) ClampRange(fromID, toID uint64) (from, to uint64, err error) {
+	first, last := s.wal.FirstLSN(), s.wal.LastLSN()
+	if fromID == 0 {
+		fromID = first
+	}
+	if toID == 0 {
+		toID = last
+	}
+
+	switch {
+	case toID < first, fromID > last:
+		return 0, 0, ErrOutOfBounds
+	}
+
+	if fromID < first {
+		fromID = first
+	}
+	if toID > last {
+		toID = last
+	}
+
+	return fromID, toID, nil
+}
+
 func (s *Storage) Write(ctx context.Context, record *Record) (uint64, error) {
 	if err := record.validate(); err != nil {
 		return 0, err
@@ -142,8 +169,7 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 		return nil, ErrEmptyRecord
 	}
 
-	dupMap := make(map[uint64][]*Record)
-	var written uint64
+	var duplicates, written uint64
 	batch := make([][]byte, 0, len(records))
 	for _, record := range records {
 		select {
@@ -157,11 +183,7 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 		}
 
 		if err := s.dup.Try(record.DedupKey); err != nil {
-			dupRecords, exists := dupMap[record.DedupKey]
-			if !exists {
-				dupRecords = make([]*Record, 0, len(records))
-			}
-			dupMap[record.DedupKey] = append(dupRecords, record)
+			duplicates++
 
 			continue
 		}
@@ -170,8 +192,14 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 		written += uint64(len(record.Bytes))
 	}
 
+	result := &BatchWriteResult{
+		DuplicatesCount: duplicates,
+		WrittenCount:    uint64(len(batch)),
+		WrittenBytes:    written,
+	}
+
 	if len(batch) == 0 {
-		return nil, nil
+		return result, nil
 	}
 
 	ids, err := s.wal.AppendBatch(ctx, batch)
@@ -179,12 +207,9 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 		return nil, err
 	}
 
-	return &BatchWriteResult{
-		IDs:             ids,
-		DuplicatesCount: uint64(len(dupMap)),
-		WrittenCount:    uint64(len(batch)),
-		WrittenBytes:    written,
-	}, nil
+	result.IDs = ids
+
+	return result, nil
 }
 
 func (s *Storage) Read(ctx context.Context, atID uint64) (*Record, error) {
