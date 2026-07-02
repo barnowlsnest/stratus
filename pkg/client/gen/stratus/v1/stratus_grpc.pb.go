@@ -23,6 +23,7 @@ const (
 	StreamService_Read_FullMethodName        = "/stratus.v1.StreamService/Read"
 	StreamService_CutOffset_FullMethodName   = "/stratus.v1.StreamService/CutOffset"
 	StreamService_GetMetadata_FullMethodName = "/stratus.v1.StreamService/GetMetadata"
+	StreamService_UpdateCache_FullMethodName = "/stratus.v1.StreamService/UpdateCache"
 )
 
 // StreamServiceClient is the client API for StreamService service.
@@ -41,6 +42,8 @@ type StreamServiceClient interface {
 	CutOffset(ctx context.Context, in *CutOffsetRequest, opts ...grpc.CallOption) (*CutOffsetResponse, error)
 	// GetMetadata returns a flat snapshot of the stream's metadata.
 	GetMetadata(ctx context.Context, in *GetMetadataRequest, opts ...grpc.CallOption) (*GetMetadataResponse, error)
+	// UpdateCache requests that the preloader refresh its cache from the ingester.
+	UpdateCache(ctx context.Context, in *UpdateCacheRequest, opts ...grpc.CallOption) (*UpdateCacheResponse, error)
 }
 
 type streamServiceClient struct {
@@ -97,6 +100,16 @@ func (c *streamServiceClient) GetMetadata(ctx context.Context, in *GetMetadataRe
 	return out, nil
 }
 
+func (c *streamServiceClient) UpdateCache(ctx context.Context, in *UpdateCacheRequest, opts ...grpc.CallOption) (*UpdateCacheResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateCacheResponse)
+	err := c.cc.Invoke(ctx, StreamService_UpdateCache_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StreamServiceServer is the server API for StreamService service.
 // All implementations must embed UnimplementedStreamServiceServer
 // for forward compatibility.
@@ -113,6 +126,8 @@ type StreamServiceServer interface {
 	CutOffset(context.Context, *CutOffsetRequest) (*CutOffsetResponse, error)
 	// GetMetadata returns a flat snapshot of the stream's metadata.
 	GetMetadata(context.Context, *GetMetadataRequest) (*GetMetadataResponse, error)
+	// UpdateCache requests that the preloader refresh its cache from the ingester.
+	UpdateCache(context.Context, *UpdateCacheRequest) (*UpdateCacheResponse, error)
 	mustEmbedUnimplementedStreamServiceServer()
 }
 
@@ -134,6 +149,9 @@ func (UnimplementedStreamServiceServer) CutOffset(context.Context, *CutOffsetReq
 }
 func (UnimplementedStreamServiceServer) GetMetadata(context.Context, *GetMetadataRequest) (*GetMetadataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMetadata not implemented")
+}
+func (UnimplementedStreamServiceServer) UpdateCache(context.Context, *UpdateCacheRequest) (*UpdateCacheResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateCache not implemented")
 }
 func (UnimplementedStreamServiceServer) mustEmbedUnimplementedStreamServiceServer() {}
 func (UnimplementedStreamServiceServer) testEmbeddedByValue()                       {}
@@ -206,6 +224,24 @@ func _StreamService_GetMetadata_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StreamService_UpdateCache_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateCacheRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamServiceServer).UpdateCache(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamService_UpdateCache_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamServiceServer).UpdateCache(ctx, req.(*UpdateCacheRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // StreamService_ServiceDesc is the grpc.ServiceDesc for StreamService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -220,6 +256,10 @@ var StreamService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetMetadata",
 			Handler:    _StreamService_GetMetadata_Handler,
+		},
+		{
+			MethodName: "UpdateCache",
+			Handler:    _StreamService_UpdateCache_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

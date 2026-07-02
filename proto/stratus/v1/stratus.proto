@@ -16,6 +16,8 @@ service StreamService {
   rpc CutOffset(CutOffsetRequest) returns (CutOffsetResponse);
   // GetMetadata returns a flat snapshot of the stream's metadata.
   rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse);
+  // UpdateCache requests that the preloader refresh its cache from the ingester.
+  rpc UpdateCache(UpdateCacheRequest) returns (UpdateCacheResponse);
 }
 
 message Record {
@@ -108,4 +110,13 @@ message GetMetadataResponse {
   double duration_seconds = 9;
   uint64 truncate_claims_count = 10; // number of Truncate calls
   int64 last_truncate_claim_at_unix = 11; // unix seconds; 0 if never truncated
+}
+
+message UpdateCacheRequest {
+  uint64 first = 1;
+  uint64 last = 2;
+}
+
+message UpdateCacheResponse {
+  Error error = 1;
 }

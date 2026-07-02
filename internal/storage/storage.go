@@ -101,6 +101,21 @@ func (r *Record) validate() error {
 	}
 }
 
+func (s *Storage) validateRange(fromID, toID uint64) error {
+	switch {
+	case fromID == 0, toID == 0:
+		return ErrOutOfBounds
+	case int(toID-fromID+1) > s.maxReadBatchSize:
+		return ErrTooLongRangeToRead
+	case s.wal.LastLSN() < fromID:
+		return ErrOutOfBounds
+	case s.wal.FirstLSN() > toID:
+		return ErrOutOfBounds
+	}
+	
+	return nil
+}
+
 func (s *Storage) Boundry() (first, last uint64) {
 	return s.wal.FirstLSN(), s.wal.LastLSN()
 }
@@ -173,15 +188,8 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 }
 
 func (s *Storage) Read(ctx context.Context, atID uint64) (*Record, error) {
-	if atID == 0 {
-		atID = s.wal.FirstLSN()
-	}
-	
-	switch {
-	case s.wal.LastLSN() < atID:
-		return nil, ErrOutOfBounds
-	case s.wal.FirstLSN() > atID:
-		return nil, ErrOutOfBounds
+	if err := s.validateRange(atID, atID); err != nil {
+		return nil, err
 	}
 	
 	reader, err := s.wal.NewReader(atID)
@@ -214,24 +222,8 @@ func (s *Storage) Read(ctx context.Context, atID uint64) (*Record, error) {
 }
 
 func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Record, error) {
-	if fromID == 0 {
-		fromID = s.wal.FirstLSN()
-	}
-	if toID == 0 {
-		toID = s.wal.LastLSN()
-	}
-	
-	length := toID - fromID + 1
-	
-	switch {
-	case toID < fromID:
-		return nil, ErrOutOfBounds
-	case int(length) > s.maxReadBatchSize:
-		return nil, ErrTooLongRangeToRead
-	case s.wal.LastLSN() < fromID:
-		return nil, ErrOutOfBounds
-	case s.wal.FirstLSN() > toID:
-		return nil, ErrOutOfBounds
+	if err := s.validateRange(fromID, toID); err != nil {
+		return nil, err
 	}
 	
 	reader, err := s.wal.NewReader(fromID)

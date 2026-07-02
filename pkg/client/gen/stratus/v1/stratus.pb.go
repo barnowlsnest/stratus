@@ -884,6 +884,102 @@ func (x *GetMetadataResponse) GetLastTruncateClaimAtUnix() int64 {
 	return 0
 }
 
+type UpdateCacheRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	First         uint64                 `protobuf:"varint,1,opt,name=first,proto3" json:"first,omitempty"`
+	Last          uint64                 `protobuf:"varint,2,opt,name=last,proto3" json:"last,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateCacheRequest) Reset() {
+	*x = UpdateCacheRequest{}
+	mi := &file_stratus_v1_stratus_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateCacheRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateCacheRequest) ProtoMessage() {}
+
+func (x *UpdateCacheRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_stratus_v1_stratus_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateCacheRequest.ProtoReflect.Descriptor instead.
+func (*UpdateCacheRequest) Descriptor() ([]byte, []int) {
+	return file_stratus_v1_stratus_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *UpdateCacheRequest) GetFirst() uint64 {
+	if x != nil {
+		return x.First
+	}
+	return 0
+}
+
+func (x *UpdateCacheRequest) GetLast() uint64 {
+	if x != nil {
+		return x.Last
+	}
+	return 0
+}
+
+type UpdateCacheResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         *Error                 `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateCacheResponse) Reset() {
+	*x = UpdateCacheResponse{}
+	mi := &file_stratus_v1_stratus_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateCacheResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateCacheResponse) ProtoMessage() {}
+
+func (x *UpdateCacheResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_stratus_v1_stratus_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateCacheResponse.ProtoReflect.Descriptor instead.
+func (*UpdateCacheResponse) Descriptor() ([]byte, []int) {
+	return file_stratus_v1_stratus_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *UpdateCacheResponse) GetError() *Error {
+	if x != nil {
+		return x.Error
+	}
+	return nil
+}
+
 var File_stratus_v1_stratus_proto protoreflect.FileDescriptor
 
 const file_stratus_v1_stratus_proto_rawDesc = "" +
@@ -940,18 +1036,24 @@ const file_stratus_v1_stratus_proto_rawDesc = "" +
 	"\x10duration_seconds\x18\t \x01(\x01R\x0fdurationSeconds\x122\n" +
 	"\x15truncate_claims_count\x18\n" +
 	" \x01(\x04R\x13truncateClaimsCount\x12<\n" +
-	"\x1blast_truncate_claim_at_unix\x18\v \x01(\x03R\x17lastTruncateClaimAtUnix*q\n" +
+	"\x1blast_truncate_claim_at_unix\x18\v \x01(\x03R\x17lastTruncateClaimAtUnix\">\n" +
+	"\x12UpdateCacheRequest\x12\x14\n" +
+	"\x05first\x18\x01 \x01(\x04R\x05first\x12\x12\n" +
+	"\x04last\x18\x02 \x01(\x04R\x04last\">\n" +
+	"\x13UpdateCacheResponse\x12'\n" +
+	"\x05error\x18\x01 \x01(\v2\x11.stratus.v1.ErrorR\x05error*q\n" +
 	"\x03Err\x12\x0f\n" +
 	"\vERR_UNKNOWN\x10\x00\x12\x18\n" +
 	"\x14ERR_INVALID_ARGUMENT\x10\x01\x12\x11\n" +
 	"\rERR_NOT_FOUND\x10\x02\x12\x16\n" +
 	"\x12ERR_ALREADY_EXISTS\x10\x03\x12\x14\n" +
-	"\x10ERR_OUT_OF_RANGE\x10\x042\xaa\x02\n" +
+	"\x10ERR_OUT_OF_RANGE\x10\x042\xfa\x02\n" +
 	"\rStreamService\x12@\n" +
 	"\x05Write\x12\x18.stratus.v1.WriteRequest\x1a\x19.stratus.v1.WriteResponse(\x010\x01\x12=\n" +
 	"\x04Read\x12\x17.stratus.v1.ReadRequest\x1a\x18.stratus.v1.ReadResponse(\x010\x01\x12H\n" +
 	"\tCutOffset\x12\x1c.stratus.v1.CutOffsetRequest\x1a\x1d.stratus.v1.CutOffsetResponse\x12N\n" +
-	"\vGetMetadata\x12\x1e.stratus.v1.GetMetadataRequest\x1a\x1f.stratus.v1.GetMetadataResponseBEZCgithub.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1;stratusv1b\x06proto3"
+	"\vGetMetadata\x12\x1e.stratus.v1.GetMetadataRequest\x1a\x1f.stratus.v1.GetMetadataResponse\x12N\n" +
+	"\vUpdateCache\x12\x1e.stratus.v1.UpdateCacheRequest\x1a\x1f.stratus.v1.UpdateCacheResponseBEZCgithub.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1;stratusv1b\x06proto3"
 
 var (
 	file_stratus_v1_stratus_proto_rawDescOnce sync.Once
@@ -966,7 +1068,7 @@ func file_stratus_v1_stratus_proto_rawDescGZIP() []byte {
 }
 
 var file_stratus_v1_stratus_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_stratus_v1_stratus_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_stratus_v1_stratus_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_stratus_v1_stratus_proto_goTypes = []any{
 	(Err)(0),                    // 0: stratus.v1.Err
 	(*Record)(nil),              // 1: stratus.v1.Record
@@ -982,6 +1084,8 @@ var file_stratus_v1_stratus_proto_goTypes = []any{
 	(*CutOffsetResponse)(nil),   // 11: stratus.v1.CutOffsetResponse
 	(*GetMetadataRequest)(nil),  // 12: stratus.v1.GetMetadataRequest
 	(*GetMetadataResponse)(nil), // 13: stratus.v1.GetMetadataResponse
+	(*UpdateCacheRequest)(nil),  // 14: stratus.v1.UpdateCacheRequest
+	(*UpdateCacheResponse)(nil), // 15: stratus.v1.UpdateCacheResponse
 }
 var file_stratus_v1_stratus_proto_depIdxs = []int32{
 	1,  // 0: stratus.v1.RecordBatch.records:type_name -> stratus.v1.Record
@@ -992,19 +1096,22 @@ var file_stratus_v1_stratus_proto_depIdxs = []int32{
 	6,  // 5: stratus.v1.ReadRequest.range:type_name -> stratus.v1.Range
 	8,  // 6: stratus.v1.ReadResponse.entries:type_name -> stratus.v1.Entry
 	4,  // 7: stratus.v1.ReadResponse.error:type_name -> stratus.v1.Error
-	3,  // 8: stratus.v1.StreamService.Write:input_type -> stratus.v1.WriteRequest
-	7,  // 9: stratus.v1.StreamService.Read:input_type -> stratus.v1.ReadRequest
-	10, // 10: stratus.v1.StreamService.CutOffset:input_type -> stratus.v1.CutOffsetRequest
-	12, // 11: stratus.v1.StreamService.GetMetadata:input_type -> stratus.v1.GetMetadataRequest
-	5,  // 12: stratus.v1.StreamService.Write:output_type -> stratus.v1.WriteResponse
-	9,  // 13: stratus.v1.StreamService.Read:output_type -> stratus.v1.ReadResponse
-	11, // 14: stratus.v1.StreamService.CutOffset:output_type -> stratus.v1.CutOffsetResponse
-	13, // 15: stratus.v1.StreamService.GetMetadata:output_type -> stratus.v1.GetMetadataResponse
-	12, // [12:16] is the sub-list for method output_type
-	8,  // [8:12] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	4,  // 8: stratus.v1.UpdateCacheResponse.error:type_name -> stratus.v1.Error
+	3,  // 9: stratus.v1.StreamService.Write:input_type -> stratus.v1.WriteRequest
+	7,  // 10: stratus.v1.StreamService.Read:input_type -> stratus.v1.ReadRequest
+	10, // 11: stratus.v1.StreamService.CutOffset:input_type -> stratus.v1.CutOffsetRequest
+	12, // 12: stratus.v1.StreamService.GetMetadata:input_type -> stratus.v1.GetMetadataRequest
+	14, // 13: stratus.v1.StreamService.UpdateCache:input_type -> stratus.v1.UpdateCacheRequest
+	5,  // 14: stratus.v1.StreamService.Write:output_type -> stratus.v1.WriteResponse
+	9,  // 15: stratus.v1.StreamService.Read:output_type -> stratus.v1.ReadResponse
+	11, // 16: stratus.v1.StreamService.CutOffset:output_type -> stratus.v1.CutOffsetResponse
+	13, // 17: stratus.v1.StreamService.GetMetadata:output_type -> stratus.v1.GetMetadataResponse
+	15, // 18: stratus.v1.StreamService.UpdateCache:output_type -> stratus.v1.UpdateCacheResponse
+	14, // [14:19] is the sub-list for method output_type
+	9,  // [9:14] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_stratus_v1_stratus_proto_init() }
@@ -1026,7 +1133,7 @@ func file_stratus_v1_stratus_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_stratus_v1_stratus_proto_rawDesc), len(file_stratus_v1_stratus_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
