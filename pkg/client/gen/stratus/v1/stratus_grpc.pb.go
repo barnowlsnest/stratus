@@ -21,7 +21,9 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	StreamService_Write_FullMethodName       = "/stratus.v1.StreamService/Write"
 	StreamService_Read_FullMethodName        = "/stratus.v1.StreamService/Read"
+	StreamService_CutOffset_FullMethodName   = "/stratus.v1.StreamService/CutOffset"
 	StreamService_GetMetadata_FullMethodName = "/stratus.v1.StreamService/GetMetadata"
+	StreamService_UpdateCache_FullMethodName = "/stratus.v1.StreamService/UpdateCache"
 )
 
 // StreamServiceClient is the client API for StreamService service.
@@ -35,8 +37,13 @@ type StreamServiceClient interface {
 	Write(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WriteRequest, WriteResponse], error)
 	// Read returns records by id (XREAD) or bounded range (XRANGE).
 	Read(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ReadRequest, ReadResponse], error)
-	// Length returns the current length of the WAL.
+	// CutOffset requests removal of records up to and including up_to; WAL
+	// reclamation is segment-based and best-effort.
+	CutOffset(ctx context.Context, in *CutOffsetRequest, opts ...grpc.CallOption) (*CutOffsetResponse, error)
+	// GetMetadata returns a flat snapshot of the stream's metadata.
 	GetMetadata(ctx context.Context, in *GetMetadataRequest, opts ...grpc.CallOption) (*GetMetadataResponse, error)
+	// UpdateCache requests that the preloader refresh its cache from the ingester.
+	UpdateCache(ctx context.Context, in *UpdateCacheRequest, opts ...grpc.CallOption) (*UpdateCacheResponse, error)
 }
 
 type streamServiceClient struct {
@@ -73,10 +80,30 @@ func (c *streamServiceClient) Read(ctx context.Context, opts ...grpc.CallOption)
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type StreamService_ReadClient = grpc.BidiStreamingClient[ReadRequest, ReadResponse]
 
+func (c *streamServiceClient) CutOffset(ctx context.Context, in *CutOffsetRequest, opts ...grpc.CallOption) (*CutOffsetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CutOffsetResponse)
+	err := c.cc.Invoke(ctx, StreamService_CutOffset_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *streamServiceClient) GetMetadata(ctx context.Context, in *GetMetadataRequest, opts ...grpc.CallOption) (*GetMetadataResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetMetadataResponse)
 	err := c.cc.Invoke(ctx, StreamService_GetMetadata_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamServiceClient) UpdateCache(ctx context.Context, in *UpdateCacheRequest, opts ...grpc.CallOption) (*UpdateCacheResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateCacheResponse)
+	err := c.cc.Invoke(ctx, StreamService_UpdateCache_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,8 +121,13 @@ type StreamServiceServer interface {
 	Write(grpc.BidiStreamingServer[WriteRequest, WriteResponse]) error
 	// Read returns records by id (XREAD) or bounded range (XRANGE).
 	Read(grpc.BidiStreamingServer[ReadRequest, ReadResponse]) error
-	// Length returns the current length of the WAL.
+	// CutOffset requests removal of records up to and including up_to; WAL
+	// reclamation is segment-based and best-effort.
+	CutOffset(context.Context, *CutOffsetRequest) (*CutOffsetResponse, error)
+	// GetMetadata returns a flat snapshot of the stream's metadata.
 	GetMetadata(context.Context, *GetMetadataRequest) (*GetMetadataResponse, error)
+	// UpdateCache requests that the preloader refresh its cache from the ingester.
+	UpdateCache(context.Context, *UpdateCacheRequest) (*UpdateCacheResponse, error)
 	mustEmbedUnimplementedStreamServiceServer()
 }
 
@@ -112,8 +144,14 @@ func (UnimplementedStreamServiceServer) Write(grpc.BidiStreamingServer[WriteRequ
 func (UnimplementedStreamServiceServer) Read(grpc.BidiStreamingServer[ReadRequest, ReadResponse]) error {
 	return status.Error(codes.Unimplemented, "method Read not implemented")
 }
+func (UnimplementedStreamServiceServer) CutOffset(context.Context, *CutOffsetRequest) (*CutOffsetResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CutOffset not implemented")
+}
 func (UnimplementedStreamServiceServer) GetMetadata(context.Context, *GetMetadataRequest) (*GetMetadataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMetadata not implemented")
+}
+func (UnimplementedStreamServiceServer) UpdateCache(context.Context, *UpdateCacheRequest) (*UpdateCacheResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateCache not implemented")
 }
 func (UnimplementedStreamServiceServer) mustEmbedUnimplementedStreamServiceServer() {}
 func (UnimplementedStreamServiceServer) testEmbeddedByValue()                       {}
@@ -150,6 +188,24 @@ func _StreamService_Read_Handler(srv interface{}, stream grpc.ServerStream) erro
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type StreamService_ReadServer = grpc.BidiStreamingServer[ReadRequest, ReadResponse]
 
+func _StreamService_CutOffset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CutOffsetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamServiceServer).CutOffset(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamService_CutOffset_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamServiceServer).CutOffset(ctx, req.(*CutOffsetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _StreamService_GetMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetMetadataRequest)
 	if err := dec(in); err != nil {
@@ -168,6 +224,24 @@ func _StreamService_GetMetadata_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StreamService_UpdateCache_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateCacheRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamServiceServer).UpdateCache(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamService_UpdateCache_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamServiceServer).UpdateCache(ctx, req.(*UpdateCacheRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // StreamService_ServiceDesc is the grpc.ServiceDesc for StreamService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -176,8 +250,16 @@ var StreamService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*StreamServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "CutOffset",
+			Handler:    _StreamService_CutOffset_Handler,
+		},
+		{
 			MethodName: "GetMetadata",
 			Handler:    _StreamService_GetMetadata_Handler,
+		},
+		{
+			MethodName: "UpdateCache",
+			Handler:    _StreamService_UpdateCache_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -122,6 +122,64 @@ func (s *StorageTestSuite) TestWriteBatchExcludesDuplicates() {
 	s.Require().Equal(expectedPayload, actual.Bytes)
 }
 
+func (s *StorageTestSuite) TestWriteBatchAllDuplicatesReturnsResultNotNil() {
+	ctx := s.T().Context()
+
+	seed := []*Record{
+		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)},
+		{DedupKey: 2, Bytes: []byte(`{"op":"set","k":"b"}`)},
+	}
+	_, err := s.storage.WriteBatch(ctx, seed)
+	s.Require().NoError(err)
+
+	input := []*Record{
+		{DedupKey: 1, Bytes: []byte(`{"op":"set","k":"a"}`)}, // duplicate
+		{DedupKey: 2, Bytes: []byte(`{"op":"set","k":"b"}`)}, // duplicate
+	}
+	result, err := s.storage.WriteBatch(ctx, input)
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+
+	expectedDups := uint64(2)
+	s.Require().Equal(expectedDups, result.DuplicatesCount)
+	s.Require().Empty(result.IDs)
+	s.Require().Zero(result.WrittenCount)
+}
+
+func (s *StorageTestSuite) TestWriteBatchCountsDuplicateRecordsNotUniqueKeys() {
+	ctx := s.T().Context()
+
+	seed := []*Record{
+		{DedupKey: 7, Bytes: []byte(`{"op":"set","k":"a"}`)},
+	}
+	_, err := s.storage.WriteBatch(ctx, seed)
+	s.Require().NoError(err)
+
+	// All-duplicate batch with a repeated key: two skipped records, one key.
+	allDup := []*Record{
+		{DedupKey: 7, Bytes: []byte(`{"op":"set","k":"a"}`)},
+		{DedupKey: 7, Bytes: []byte(`{"op":"set","k":"a"}`)},
+	}
+	result, err := s.storage.WriteBatch(ctx, allDup)
+	s.Require().NoError(err)
+	s.Require().NotNil(result)
+
+	expectedDups := uint64(2)
+	s.Require().Equal(expectedDups, result.DuplicatesCount)
+	s.Require().Empty(result.IDs)
+
+	// Mixed batch on the normal path: two skipped records sharing a key, one written.
+	mixed := []*Record{
+		{DedupKey: 7, Bytes: []byte(`{"op":"set","k":"a"}`)},
+		{DedupKey: 7, Bytes: []byte(`{"op":"set","k":"a"}`)},
+		{DedupKey: 8, Bytes: []byte(`{"op":"set","k":"b"}`)},
+	}
+	result, err = s.storage.WriteBatch(ctx, mixed)
+	s.Require().NoError(err)
+	s.Require().Equal(expectedDups, result.DuplicatesCount)
+	s.Require().Len(result.IDs, 1)
+}
+
 func (s *StorageTestSuite) TestReadBatchReturnsDistinctPayloads() {
 	ctx := s.T().Context()
 

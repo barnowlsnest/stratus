@@ -2,11 +2,13 @@ package ingester
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/barnowlsnest/go-logslib/v2/pkg/logger"
 	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
+	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/barnowlsnest/stratus/internal/storage"
 )
 
@@ -20,11 +22,13 @@ type (
 	}
 
 	Metadata struct {
-		BytesWritten    uint64
-		DuplicatesCount uint64
-		WritesCount     uint64
-		WritesPerSecond float64
-		Duration        time.Duration
+		BytesWritten        uint64
+		DuplicatesCount     uint64
+		WritesCount         uint64
+		TruncateClaimsCount uint64
+		WritesPerSecond     float64
+		Duration            time.Duration
+		LastTruncateClaimAt time.Time
 	}
 
 	Option func(*Ingester)
@@ -77,11 +81,27 @@ func (in *Ingester) Metadata() *Metadata {
 	return in.metadata
 }
 
+func (in *Ingester) UpdateMetadataOnTruncateClaim() {
+	in.mux.Lock()
+	defer in.mux.Unlock()
+
+	in.metadata.TruncateClaimsCount++
+	in.metadata.LastTruncateClaimAt = time.Now().UTC()
+}
+
 func (in *Ingester) Write(ctx context.Context, record *storage.Record) (uint64, error) {
 	id, err := in.storage.Write(ctx, record)
 	if err != nil {
-		in.logger.Error("failed to write record", sharedlog.F("error", err))
-		return 0, err
+		in.logger.Error("failed to write record", sharedlog.F("error", err.Error()))
+		switch {
+		case errors.Is(err, dedup.ErrDuplicateChunk):
+			in.mux.Lock()
+			defer in.mux.Unlock()
+			in.metadata.DuplicatesCount++
+			return 0, err
+		default:
+			return 0, err
+		}
 	}
 
 	in.mux.Lock()

@@ -24,15 +24,17 @@ type (
 
 	// Metadata is a flat snapshot of the stream's preloader and ingester state.
 	Metadata struct {
-		StorageSize     uint64
-		CacheSize       uint64
-		FirstID         uint64
-		LastID          uint64
-		BytesWritten    uint64
-		DuplicatesCount uint64
-		WritesCount     uint64
-		WritesPerSecond float64
-		DurationSeconds float64
+		StorageSize             uint64
+		CacheSize               uint64
+		FirstID                 uint64
+		LastID                  uint64
+		BytesWritten            uint64
+		DuplicatesCount         uint64
+		WritesCount             uint64
+		WritesPerSecond         float64
+		DurationSeconds         float64
+		TruncateClaimsCount     uint64
+		LastTruncateClaimAtUnix int64
 	}
 
 	// Client owns one connection and two long-lived streams. Each stream is
@@ -104,6 +106,10 @@ func (c *Client) Write(ctx context.Context, dedupKey uint64, payload []byte) (ui
 		return 0, err
 	}
 
+	if pbErr := resp.GetError(); pbErr != nil {
+		return 0, newError(pbErr)
+	}
+
 	return resp.GetStart(), nil
 }
 
@@ -133,6 +139,10 @@ func (c *Client) WriteBatch(ctx context.Context, records []Record) (first, last 
 		return 0, 0, err
 	}
 
+	if pbErr := resp.GetError(); pbErr != nil {
+		return 0, 0, newError(pbErr)
+	}
+
 	return resp.GetStart(), resp.GetEnd(), nil
 }
 
@@ -153,6 +163,10 @@ func (c *Client) Read(ctx context.Context, id uint64) (Entry, error) {
 	resp, err := c.readStream.Recv()
 	if err != nil {
 		return Entry{}, err
+	}
+
+	if pbErr := resp.GetError(); pbErr != nil {
+		return Entry{}, newError(pbErr)
 	}
 
 	if len(resp.GetEntries()) == 0 {
@@ -185,6 +199,10 @@ func (c *Client) Range(ctx context.Context, first, last uint64) ([]Entry, error)
 		return nil, err
 	}
 
+	if pbErr := resp.GetError(); pbErr != nil {
+		return nil, newError(pbErr)
+	}
+
 	entries := make([]Entry, len(resp.GetEntries()))
 	for i, entry := range resp.GetEntries() {
 		entries[i] = Entry{ID: entry.GetId(), Payload: entry.GetPayload()}
@@ -206,16 +224,34 @@ func (c *Client) GetMetadata(ctx context.Context) (Metadata, error) {
 	}
 
 	return Metadata{
-		StorageSize:     resp.GetStorageSize(),
-		CacheSize:       resp.GetCacheSize(),
-		FirstID:         resp.GetFirstId(),
-		LastID:          resp.GetLastId(),
-		BytesWritten:    resp.GetBytesWritten(),
-		DuplicatesCount: resp.GetDuplicatesCount(),
-		WritesCount:     resp.GetWritesCount(),
-		WritesPerSecond: resp.GetWritesPerSecond(),
-		DurationSeconds: resp.GetDurationSeconds(),
+		StorageSize:             resp.GetStorageSize(),
+		CacheSize:               resp.GetCacheSize(),
+		FirstID:                 resp.GetFirstId(),
+		LastID:                  resp.GetLastId(),
+		BytesWritten:            resp.GetBytesWritten(),
+		DuplicatesCount:         resp.GetDuplicatesCount(),
+		WritesCount:             resp.GetWritesCount(),
+		WritesPerSecond:         resp.GetWritesPerSecond(),
+		DurationSeconds:         resp.GetDurationSeconds(),
+		TruncateClaimsCount:     resp.GetTruncateClaimsCount(),
+		LastTruncateClaimAtUnix: resp.GetLastTruncateClaimAtUnix(),
 	}, nil
+}
+
+// Truncate requests removal of all records up to and including upTo, returning
+// the inclusive LSN range requested; WAL reclamation is segment-based and
+// best-effort, so some ids at or below upTo may remain readable.
+func (c *Client) Truncate(ctx context.Context, upTo uint64) (first, last uint64, err error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
+	}
+
+	resp, err := c.service.CutOffset(ctx, &stratusv1.CutOffsetRequest{UpTo: upTo})
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return resp.GetFirst(), resp.GetLast(), nil
 }
 
 // Close closes the underlying connection (which closes both streams).

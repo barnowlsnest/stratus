@@ -47,6 +47,11 @@ func main() {
 		log.Fatalf("failed to open WAL: %v", err)
 	}
 
+	sharedlog.Info("wal opened",
+		sharedlog.F("bytesTruncated", r.BytesTruncated),
+		sharedlog.F("segmentsRemoved", r.SegmentsRemoved),
+	)
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
@@ -78,7 +83,12 @@ func main() {
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return pre.Start(gCtx, r.FirstLSN, r.LastLSN)
+		if err := pre.Start(gCtx, r.FirstLSN, r.LastLSN); err != nil {
+			sharedlog.Error(err, sharedlog.F("reason", "preloader start failed"))
+			return err
+		}
+
+		return nil
 	})
 
 	if err := pre.WaitStarted(gCtx, preCacheStartTimeout); err != nil {
@@ -115,7 +125,12 @@ func main() {
 	}
 
 	g.Go(func() error {
-		return srv.Run(gCtx)
+		if err := srv.Run(gCtx); err != nil {
+			sharedlog.Error(err, sharedlog.F("reason", "server run failed"))
+			return err
+		}
+
+		return nil
 	})
 
 	if err := g.Wait(); err != nil {

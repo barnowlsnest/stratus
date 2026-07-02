@@ -141,3 +141,17 @@ func (s *Stream) Range(ctx context.Context, first, last uint64) ([]*Item, error)
 
 	return items, nil
 }
+
+func (s *Stream) Cut(ctx context.Context, upTo uint64) error {
+	if err := s.cache.Delete(ctx, upTo); err != nil {
+		return err
+	}
+
+	s.ingester.UpdateMetadataOnTruncateClaim()
+
+	return nil
+}
+
+func (s *Stream) UpdateCache(ctx context.Context, first, last uint64) error {
+	return s.cache.Update(ctx, first, last)
+}

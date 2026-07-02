@@ -102,8 +102,10 @@ func (p *Preloader) Start(ctx context.Context, first, last uint64) error {
 	pCtx, pCancel := context.WithCancel(ctx)
 	p.cancel = pCancel
 
-	if err := p.fetchAndCacheRecords(pCtx, first, last); err != nil {
-		return err
+	if first > 0 && last > 0 {
+		if err := p.fetchAndCacheRecords(pCtx, first, last); err != nil {
+			return err
+		}
 	}
 
 	records, err := p.storage.Subscribe(pCtx, last, p.subscriberBuffer)
@@ -176,12 +178,17 @@ func (cache *Cache) Metadata() *Metadata {
 	}
 }
 
+func (cache *Cache) Update(ctx context.Context, fromID, toID uint64) error {
+	return cache.pre.fetchAndCacheRecords(ctx, fromID, toID)
+}
+
 func (cache *Cache) GetRecord(ctx context.Context, id uint64) (*storage.Record, error) {
 	return cache.pre.lazyLoadRecord(ctx, id)
 }
 
 func (cache *Cache) RangeRecords(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error) {
-	if err := cache.pre.fetchAndCacheRecords(ctx, fromID, toID); err != nil {
+	fromID, toID, err := cache.pre.storage.ClampRange(fromID, toID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -196,6 +203,24 @@ func (cache *Cache) RangeRecords(ctx context.Context, fromID, toID uint64) ([]*s
 	}
 
 	return records, nil
+}
+
+func (cache *Cache) Delete(ctx context.Context, upTo uint64) error {
+	oldFirst, _ := cache.pre.storage.Boundry()
+	if err := cache.pre.storage.Cut(ctx, upTo); err != nil {
+		return err
+	}
+
+	// WAL truncation is best-effort segment reclamation: only entries below the
+	// new low-water mark are actually gone, so evict exactly those from the cache.
+	newFirst, _ := cache.pre.storage.Boundry()
+	keys := make([]uint64, 0, newFirst-oldFirst)
+	for id := oldFirst; id < newFirst; id++ {
+		keys = append(keys, id)
+	}
+	cache.pre.lru.Delete(keys...)
+
+	return nil
 }
 
 func (p *Preloader) lazyLoadRecord(ctx context.Context, id uint64) (*storage.Record, error) {

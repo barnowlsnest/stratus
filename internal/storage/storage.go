@@ -101,8 +101,50 @@ func (r *Record) validate() error {
 	}
 }
 
+func (s *Storage) validateRange(fromID, toID uint64) error {
+	switch {
+	case fromID == 0, toID == 0:
+		return ErrOutOfBounds
+	case int(toID-fromID+1) > s.maxReadBatchSize:
+		return ErrTooLongRangeToRead
+	case s.wal.LastLSN() < fromID:
+		return ErrOutOfBounds
+	case s.wal.FirstLSN() > toID:
+		return ErrOutOfBounds
+	}
+
+	return nil
+}
+
 func (s *Storage) Boundry() (first, last uint64) {
 	return s.wal.FirstLSN(), s.wal.LastLSN()
+}
+
+// ClampRange resolves zero sentinels (from == first, to == last) and clamps an
+// overlapping range to the available window. A range that falls entirely
+// outside the window returns ErrOutOfBounds.
+func (s *Storage) ClampRange(fromID, toID uint64) (from, to uint64, err error) {
+	first, last := s.wal.FirstLSN(), s.wal.LastLSN()
+	if fromID == 0 {
+		fromID = first
+	}
+	if toID == 0 {
+		toID = last
+	}
+
+	switch {
+	case toID < first, fromID > last:
+		return 0, 0, ErrOutOfBounds
+	}
+
+	if fromID < first {
+		fromID = first
+	}
+	if toID > last {
+		toID = last
+	}
+
+	return fromID, toID, nil
 }
 
 func (s *Storage) Write(ctx context.Context, record *Record) (uint64, error) {
@@ -127,8 +169,7 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 		return nil, ErrEmptyRecord
 	}
 
-	dupMap := make(map[uint64][]*Record)
-	var written uint64
+	var duplicates, written uint64
 	batch := make([][]byte, 0, len(records))
 	for _, record := range records {
 		select {
@@ -142,11 +183,7 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 		}
 
 		if err := s.dup.Try(record.DedupKey); err != nil {
-			dupRecords, exists := dupMap[record.DedupKey]
-			if !exists {
-				dupRecords = make([]*Record, 0, len(records))
-			}
-			dupMap[record.DedupKey] = append(dupRecords, record)
+			duplicates++
 
 			continue
 		}
@@ -155,8 +192,14 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 		written += uint64(len(record.Bytes))
 	}
 
+	result := &BatchWriteResult{
+		DuplicatesCount: duplicates,
+		WrittenCount:    uint64(len(batch)),
+		WrittenBytes:    written,
+	}
+
 	if len(batch) == 0 {
-		return nil, nil
+		return result, nil
 	}
 
 	ids, err := s.wal.AppendBatch(ctx, batch)
@@ -164,24 +207,14 @@ func (s *Storage) WriteBatch(ctx context.Context, records []*Record) (*BatchWrit
 		return nil, err
 	}
 
-	return &BatchWriteResult{
-		IDs:             ids,
-		DuplicatesCount: uint64(len(dupMap)),
-		WrittenCount:    uint64(len(batch)),
-		WrittenBytes:    written,
-	}, nil
+	result.IDs = ids
+
+	return result, nil
 }
 
 func (s *Storage) Read(ctx context.Context, atID uint64) (*Record, error) {
-	if atID == 0 {
-		atID = s.wal.FirstLSN()
-	}
-
-	switch {
-	case s.wal.LastLSN() < atID:
-		return nil, ErrOutOfBounds
-	case s.wal.FirstLSN() > atID:
-		return nil, ErrOutOfBounds
+	if err := s.validateRange(atID, atID); err != nil {
+		return nil, err
 	}
 
 	reader, err := s.wal.NewReader(atID)
@@ -214,24 +247,8 @@ func (s *Storage) Read(ctx context.Context, atID uint64) (*Record, error) {
 }
 
 func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Record, error) {
-	if fromID == 0 {
-		fromID = s.wal.FirstLSN()
-	}
-	if toID == 0 {
-		toID = s.wal.LastLSN()
-	}
-
-	length := toID - fromID + 1
-
-	switch {
-	case toID < fromID:
-		return nil, ErrOutOfBounds
-	case int(length) > s.maxReadBatchSize:
-		return nil, ErrTooLongRangeToRead
-	case s.wal.LastLSN() < fromID:
-		return nil, ErrOutOfBounds
-	case s.wal.FirstLSN() > toID:
-		return nil, ErrOutOfBounds
+	if err := s.validateRange(fromID, toID); err != nil {
+		return nil, err
 	}
 
 	reader, err := s.wal.NewReader(fromID)
@@ -268,7 +285,7 @@ func (s *Storage) ReadBatch(ctx context.Context, fromID, toID uint64) ([]*Record
 	return batch, nil
 }
 
-func (s *Storage) Truncate(ctx context.Context, toID uint64) error {
+func (s *Storage) Cut(ctx context.Context, toID uint64) error {
 	if toID == 0 {
 		toID = s.wal.LastLSN()
 	}
@@ -276,7 +293,7 @@ func (s *Storage) Truncate(ctx context.Context, toID uint64) error {
 		return ErrOutOfBounds
 	}
 
-	return s.wal.TruncateContext(ctx, toID)
+	return s.wal.CutOffsetContext(ctx, toID)
 }
 
 func (s *Storage) Subscribe(ctx context.Context, fromID uint64, buffer int) (records <-chan *Record, err error) {

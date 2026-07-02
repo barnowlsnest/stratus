@@ -113,7 +113,17 @@ func (s *Server) stop(g *grpc.Server) {
 	}
 }
 
+// inStreamError maps err to an in-stream Error with current WAL bounds
+// attached, or nil when the error is fatal and must terminate the RPC.
+func (s *Server) inStreamError(err error) *stratusv1.Error {
+	metadata := s.stream.Metadata()
+
+	return toError(err, metadata.Preloader.FirstID, metadata.Preloader.LastID)
+}
+
 // Write handles the bidirectional write stream: one request → one response.
+// Recoverable failures are sent as in-stream errors; only fatal errors
+// terminate the stream.
 func (s *Server) Write(srv stratusv1.StreamService_WriteServer) error {
 	ctx := srv.Context()
 	for {
@@ -126,12 +136,18 @@ func (s *Server) Write(srv stratusv1.StreamService_WriteServer) error {
 			return err
 		}
 
+		response := &stratusv1.WriteResponse{}
 		start, end, err := s.handleWrite(ctx, req)
-		if err != nil {
+		switch streamErr := s.inStreamError(err); {
+		case err == nil:
+			response.Start, response.End = start, end
+		case streamErr == nil:
 			return toStatus(err)
+		default:
+			response.Error = streamErr
 		}
 
-		if err := srv.Send(&stratusv1.WriteResponse{Start: start, End: end}); err != nil {
+		if err := srv.Send(response); err != nil {
 			return err
 		}
 	}
@@ -155,6 +171,8 @@ func (s *Server) handleWrite(ctx context.Context, req *stratusv1.WriteRequest) (
 }
 
 // Read handles the bidirectional read stream: one query → one response.
+// Recoverable failures are sent as in-stream errors; only fatal errors
+// terminate the stream.
 func (s *Server) Read(srv stratusv1.StreamService_ReadServer) error {
 	ctx := srv.Context()
 	for {
@@ -167,12 +185,18 @@ func (s *Server) Read(srv stratusv1.StreamService_ReadServer) error {
 			return err
 		}
 
+		response := &stratusv1.ReadResponse{}
 		entries, err := s.handleRead(ctx, req)
-		if err != nil {
+		switch streamErr := s.inStreamError(err); {
+		case err == nil:
+			response.Entries = entries
+		case streamErr == nil:
 			return toStatus(err)
+		default:
+			response.Error = streamErr
 		}
 
-		if err := srv.Send(&stratusv1.ReadResponse{Entries: entries}); err != nil {
+		if err := srv.Send(response); err != nil {
 			return err
 		}
 	}
@@ -189,17 +213,45 @@ func (s *Server) GetMetadata(ctx context.Context, _ *stratusv1.GetMetadataReques
 
 	m := s.stream.Metadata()
 
+	var lastTruncateClaimAtUnix int64
+	if t := m.Ingester.LastTruncateClaimAt; !t.IsZero() {
+		lastTruncateClaimAtUnix = t.Unix()
+	}
+
 	return &stratusv1.GetMetadataResponse{
-		StorageSize:     m.Preloader.StorageSize,
-		CacheSize:       m.Preloader.CacheSize,
-		FirstId:         m.Preloader.FirstID,
-		LastId:          m.Preloader.LastID,
-		BytesWritten:    m.Ingester.BytesWritten,
-		DuplicatesCount: m.Ingester.DuplicatesCount,
-		WritesCount:     m.Ingester.WritesCount,
-		WritesPerSecond: m.Ingester.WritesPerSecond,
-		DurationSeconds: m.Ingester.Duration.Seconds(),
+		StorageSize:             m.Preloader.StorageSize,
+		CacheSize:               m.Preloader.CacheSize,
+		FirstId:                 m.Preloader.FirstID,
+		LastId:                  m.Preloader.LastID,
+		BytesWritten:            m.Ingester.BytesWritten,
+		DuplicatesCount:         m.Ingester.DuplicatesCount,
+		WritesCount:             m.Ingester.WritesCount,
+		WritesPerSecond:         m.Ingester.WritesPerSecond,
+		DurationSeconds:         m.Ingester.Duration.Seconds(),
+		TruncateClaimsCount:     m.Ingester.TruncateClaimsCount,
+		LastTruncateClaimAtUnix: lastTruncateClaimAtUnix,
 	}, nil
+}
+
+// CutOffset drops all records up to and including up_to, replying with the
+// dropped LSN range.
+func (s *Server) CutOffset(ctx context.Context, req *stratusv1.CutOffsetRequest) (*stratusv1.CutOffsetResponse, error) {
+	upTo := req.GetUpTo()
+	first := s.stream.Metadata().Preloader.FirstID
+
+	if err := s.stream.Cut(ctx, upTo); err != nil {
+		return nil, toStatus(err)
+	}
+
+	return &stratusv1.CutOffsetResponse{First: first, Last: upTo}, nil
+}
+
+func (s *Server) UpdateCache(ctx context.Context, req *stratusv1.UpdateCacheRequest) (*stratusv1.UpdateCacheResponse, error) {
+	if err := s.stream.UpdateCache(ctx, req.First, req.Last); err != nil {
+		return nil, toStatus(err)
+	}
+
+	return &stratusv1.UpdateCacheResponse{}, nil
 }
 
 func (s *Server) handleRead(ctx context.Context, req *stratusv1.ReadRequest) ([]*stratusv1.Entry, error) {

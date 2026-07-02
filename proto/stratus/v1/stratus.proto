@@ -11,8 +11,13 @@ service StreamService {
   rpc Write(stream WriteRequest) returns (stream WriteResponse);
   // Read returns records by id (XREAD) or bounded range (XRANGE).
   rpc Read(stream ReadRequest) returns (stream ReadResponse);
-  // Length returns the current length of the WAL.
+  // CutOffset requests removal of records up to and including up_to; WAL
+  // reclamation is segment-based and best-effort.
+  rpc CutOffset(CutOffsetRequest) returns (CutOffsetResponse);
+  // GetMetadata returns a flat snapshot of the stream's metadata.
   rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse);
+  // UpdateCache requests that the preloader refresh its cache from the ingester.
+  rpc UpdateCache(UpdateCacheRequest) returns (UpdateCacheResponse);
 }
 
 message Record {
@@ -31,9 +36,29 @@ message WriteRequest {
   }
 }
 
+// Err classifies a recoverable per-request failure sent on the stream.
+enum Err {
+  ERR_UNKNOWN = 0;
+  ERR_INVALID_ARGUMENT = 1;
+  ERR_NOT_FOUND = 2;
+  ERR_ALREADY_EXISTS = 3;
+  ERR_OUT_OF_RANGE = 4;
+}
+
+// Error reports a recoverable failure of a single request; the stream stays
+// connected. first_lsn/last_lsn carry the available WAL bounds for
+// ERR_OUT_OF_RANGE and ERR_NOT_FOUND (0 = unset).
+message Error {
+  Err code = 1;
+  string message = 2;
+  uint64 first_lsn = 3;
+  uint64 last_lsn = 4;
+}
+
 message WriteResponse {
   uint64 start = 1;
   uint64 end = 2; // == start for a single record
+  Error error = 3; // set instead of start/end when the request failed recoverably
 }
 
 message Range {
@@ -55,6 +80,16 @@ message Entry {
 
 message ReadResponse {
   repeated Entry entries = 1;
+  Error error = 2; // set instead of entries when the request failed recoverably
+}
+
+message CutOffsetRequest {
+  uint64 up_to = 1; // requests removal of records up to and including this LSN (best-effort)
+}
+
+message CutOffsetResponse {
+  uint64 first = 1; // first LSN whose removal was requested
+  uint64 last = 2;  // last LSN whose removal was requested (== up_to)
 }
 
 message GetMetadataRequest {}
@@ -73,4 +108,15 @@ message GetMetadataResponse {
   uint64 writes_count = 7;
   double writes_per_second = 8;
   double duration_seconds = 9;
+  uint64 truncate_claims_count = 10; // number of Truncate calls
+  int64 last_truncate_claim_at_unix = 11; // unix seconds; 0 if never truncated
+}
+
+message UpdateCacheRequest {
+  uint64 first = 1;
+  uint64 last = 2;
+}
+
+message UpdateCacheResponse {
+  Error error = 1;
 }
