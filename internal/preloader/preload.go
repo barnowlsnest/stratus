@@ -206,16 +206,26 @@ func (cache *Cache) RangeRecords(ctx context.Context, fromID, toID uint64) ([]*s
 }
 
 func (cache *Cache) Delete(ctx context.Context, upTo uint64) error {
-	oldFirst, _ := cache.pre.storage.Boundry()
+	oldFirst, oldLast := cache.pre.storage.Boundry()
 	if err := cache.pre.storage.Cut(ctx, upTo); err != nil {
 		return err
 	}
 
 	// WAL truncation is best-effort segment reclamation: only entries below the
 	// new low-water mark are actually gone, so evict exactly those from the cache.
+	// A cut that reclaims every record leaves an empty WAL, reported as a zero
+	// first LSN — in that case every cached entry from the old window is gone.
 	newFirst, _ := cache.pre.storage.Boundry()
-	keys := make([]uint64, 0, newFirst-oldFirst)
-	for id := oldFirst; id < newFirst; id++ {
+	evictBelow := newFirst
+	if newFirst == 0 {
+		evictBelow = oldLast + 1
+	}
+	if evictBelow <= oldFirst {
+		return nil
+	}
+
+	keys := make([]uint64, 0, evictBelow-oldFirst)
+	for id := oldFirst; id < evictBelow; id++ {
 		keys = append(keys, id)
 	}
 	cache.pre.lru.Delete(keys...)

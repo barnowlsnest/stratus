@@ -60,6 +60,19 @@ func newCutCache(t *testing.T) *preloader.Cache {
 	return cache
 }
 
+// TestDeleteEmptyingWALDoesNotPanic guards the cache eviction after a cut that
+// reclaims every remaining record: the WAL reports a zero first LSN, and the
+// eviction range must not underflow into a huge slice capacity.
+func TestDeleteEmptyingWALDoesNotPanic(t *testing.T) {
+	cache := newCutCache(t)
+	ctx := context.Background()
+
+	require.NoError(t, cache.Delete(ctx, 100))
+
+	first := cache.Metadata().FirstID
+	require.Zero(t, first)
+}
+
 // TestRangeRecordsClampsToAvailableWindow pins the read contract after a cut:
 // ranges overlapping the available window return the available records, zero
 // ids mean "from beginning" / "to end", and only fully-disjoint ranges are out
