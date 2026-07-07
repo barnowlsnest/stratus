@@ -8,6 +8,8 @@ tasks:
   gen:
     desc: Generate gRPC code from proto
     cmds:
+      - buf dep update
+      - buf build
       - buf generate
 
   go-fmt:

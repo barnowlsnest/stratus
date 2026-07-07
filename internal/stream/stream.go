@@ -2,16 +2,21 @@ package stream
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
+	"time"
 
-	"github.com/barnowlsnest/stratus/internal/ingester"
-	"github.com/barnowlsnest/stratus/internal/preloader"
+	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
 	"github.com/barnowlsnest/stratus/internal/storage"
 )
 
 type (
 	Stream struct {
-		ingester *ingester.Ingester
-		cache    *preloader.Cache
+		subscriberBuffer int
+		storage          *storage.Storage
+		lru              *lru.LRU[storage.Record]
+		stop             context.CancelFunc
+		started          atomic.Bool
 	}
 
 	// Item is a single stream entry.
@@ -22,13 +27,28 @@ type (
 		RawBytes []byte
 	}
 
-	Metadata struct {
-		Preloader *preloader.Metadata
-		Ingester  *ingester.Metadata
+	Range struct {
+		first uint64
+		last  uint64
+	}
+
+	AddResult struct {
+		StreamRange Range
+		AddedRange  Range
+		DedupCount  uint64
+	}
+
+	DelResult struct {
+		StreamRange  Range
+		DeletedRange Range
 	}
 
 	Option func(*Stream)
 )
+
+func (r Range) First() uint64 { return r.first }
+
+func (r Range) Last() uint64 { return r.last }
 
 func NewItem(dedupKey uint64, rawBytes []byte) *Item {
 	return &Item{
@@ -37,15 +57,21 @@ func NewItem(dedupKey uint64, rawBytes []byte) *Item {
 	}
 }
 
-func WithIngester(ingester *ingester.Ingester) Option {
+func WithStorage(storage *storage.Storage) Option {
 	return func(s *Stream) {
-		s.ingester = ingester
+		s.storage = storage
 	}
 }
 
-func WithCache(cache *preloader.Cache) Option {
+func WithCache(lru *lru.LRU[storage.Record]) Option {
 	return func(s *Stream) {
-		s.cache = cache
+		s.lru = lru
+	}
+}
+
+func WithSubscriberBuffer(buffer int) Option {
+	return func(s *Stream) {
+		s.subscriberBuffer = buffer
 	}
 }
 
@@ -62,96 +88,192 @@ func New(opts ...Option) (*Stream, error) {
 	return s, nil
 }
 
-func (s *Stream) validate() error {
-	switch {
-	case s.ingester == nil:
-		return ErrNilIngester
-	case s.cache == nil:
-		return ErrNilCache
-	default:
-		return nil
-	}
-}
-
-func (s *Stream) Metadata() *Metadata {
-	return &Metadata{
-		Preloader: s.cache.Metadata(),
-		Ingester:  s.ingester.Metadata(),
-	}
-}
-
-func (s *Stream) Add(ctx context.Context, item *Item) (first, last uint64, err error) {
-	record := &storage.Record{
-		DedupKey: item.DedupKey,
-		Bytes:    item.RawBytes,
+func (s *Stream) Start(ctx context.Context) error {
+	if s.IsStarted() {
+		return ErrAlreadyStarted
 	}
 
-	id, err := s.ingester.Write(ctx, record)
-	if err != nil {
-		return 0, 0, err
-	}
+	pCtx, pCancel := context.WithCancel(ctx)
+	s.stop = pCancel
 
-	return id, id, nil
-}
+	first, last := s.storage.Range()
 
-func (s *Stream) AddN(ctx context.Context, items ...*Item) (first, last uint64, err error) {
-	records := make([]*storage.Record, len(items))
-	for i, item := range items {
-		records[i] = &storage.Record{
-			DedupKey: item.DedupKey,
-			Bytes:    item.RawBytes,
+	if first > 0 && last > 0 {
+		if err := s.fetchAndCacheRecords(pCtx, first, last); err != nil {
+			return err
 		}
 	}
 
-	ids, err := s.ingester.WriteBatch(ctx, records)
+	records, err := s.storage.Subscribe(pCtx, last, s.subscriberBuffer)
 	if err != nil {
-		return 0, 0, err
-	}
-
-	return ids[0], ids[len(ids)-1], nil
-}
-
-func (s *Stream) Read(ctx context.Context, id uint64) (*Item, error) {
-	r, err := s.cache.GetRecord(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Item{
-		ID:       r.DedupKey,
-		DedupKey: r.DedupKey,
-		RawBytes: r.Bytes,
-	}, nil
-}
-
-func (s *Stream) Range(ctx context.Context, first, last uint64) ([]*Item, error) {
-	records, err := s.cache.RangeRecords(ctx, first, last)
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]*Item, len(records))
-	for i, record := range records {
-		items[i] = &Item{
-			ID:       record.DedupKey,
-			DedupKey: record.DedupKey,
-			RawBytes: record.Bytes,
-		}
-	}
-
-	return items, nil
-}
-
-func (s *Stream) Cut(ctx context.Context, upTo uint64) error {
-	if err := s.cache.Delete(ctx, upTo); err != nil {
 		return err
 	}
 
-	s.ingester.UpdateMetadataOnTruncateClaim()
+	s.started.Store(true)
+	for r := range records {
+		s.lru.Put(r.DedupKey, r)
+	}
+	s.started.Swap(false)
 
 	return nil
 }
 
-func (s *Stream) UpdateCache(ctx context.Context, first, last uint64) error {
-	return s.cache.Update(ctx, first, last)
+func (s *Stream) Stop(ctx context.Context) {
+	if !s.IsStarted() {
+		return
+	}
+
+	s.stop()
+	s.storage.WaitSubscribersDone(ctx)
+	s.started.Swap(false)
+}
+
+func (s *Stream) WaitForStart(ctx context.Context) error {
+	t := time.NewTicker(10 * time.Millisecond)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			if s.IsStarted() {
+				return nil
+			}
+		}
+	}
+}
+
+func (s *Stream) IsStarted() bool {
+	return s.started.Load()
+}
+
+func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult, error) {
+	res, err := s.storage.Write(ctx, records)
+	if err != nil {
+		return AddResult{}, err
+	}
+
+	if res.DuplicatesCount == uint64(len(records)) {
+		return AddResult{}, ErrAllSkipped
+	}
+
+	first, last := s.storage.Range()
+	result := AddResult{
+		StreamRange: Range{
+			first: first,
+			last:  last,
+		},
+		AddedRange: Range{
+			first: res.IDs[0],
+			last:  res.IDs[len(res.IDs)-1],
+		},
+		DedupCount: res.DuplicatesCount,
+	}
+
+	return result, nil
+}
+
+func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error) {
+	first, last, err := s.storage.ClampRange(fromID, toID)
+	if err != nil {
+		return nil, err
+	}
+
+	records := make([]*storage.Record, 0, last-first+1)
+	for id := first; id <= last; id++ {
+		r, err := s.lazyLoadRecord(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+
+		records = append(records, r)
+	}
+
+	return records, nil
+}
+
+func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
+	oldFirst, oldLast := s.storage.Range()
+	if err := s.storage.Del(ctx, upTo); err != nil {
+		return DelResult{}, err
+	}
+
+	newFirst, newLast := s.storage.Range()
+	evictBelow := newFirst
+	if newFirst == 0 {
+		evictBelow = oldLast + 1
+	}
+
+	result := DelResult{
+		StreamRange: Range{first: newFirst, last: newLast},
+	}
+	if evictBelow <= oldFirst {
+		return result, nil
+	}
+
+	result.DeletedRange = Range{first: oldFirst, last: evictBelow - 1}
+
+	keys := make([]uint64, 0, evictBelow-oldFirst)
+	for id := oldFirst; id < evictBelow; id++ {
+		keys = append(keys, id)
+	}
+
+	s.lru.Delete(keys...)
+
+	return result, nil
+}
+
+func (s *Stream) UpdateCache(ctx context.Context, fromID, toID uint64) error {
+	return s.fetchAndCacheRecords(ctx, fromID, toID)
+}
+
+func (s *Stream) lazyLoadRecord(ctx context.Context, id uint64) (*storage.Record, error) {
+	record, err := s.lru.Get(id)
+	if err != nil {
+		switch {
+		case errors.Is(err, lru.ErrCacheMiss):
+			return s.readAndCacheRecord(ctx, id)
+		default:
+			return nil, err
+		}
+	}
+
+	return record, nil
+}
+
+func (s *Stream) readAndCacheRecord(ctx context.Context, id uint64) (*storage.Record, error) {
+	records, err := s.storage.Read(ctx, id, id)
+	if err != nil {
+		return nil, err
+	}
+
+	r := records[0]
+	s.lru.Put(id, r)
+
+	return r, nil
+}
+
+func (s *Stream) fetchAndCacheRecords(ctx context.Context, fromID, toID uint64) error {
+	records, err := s.storage.Read(ctx, fromID, toID)
+	if err != nil {
+		return err
+	}
+
+	for _, r := range records {
+		s.lru.Put(r.DedupKey, r)
+	}
+
+	return nil
+}
+
+func (s *Stream) validate() error {
+	switch {
+	case s.storage == nil:
+		return ErrNilStorage
+	case s.lru == nil:
+		return ErrNilCache
+	default:
+		return nil
+	}
 }

@@ -4,4 +4,4 @@ import (
 	"errors"
 )
 
-var ErrDuplicateChunk = errors.New("dedup: err")
+var ErrDuplicate = errors.New("dedup: err")

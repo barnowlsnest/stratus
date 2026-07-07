@@ -4,141 +4,148 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
-	"github.com/barnowlsnest/go-configlib/v2/pkg/configs"
 	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
-	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
+	"github.com/barnowlsnest/go-logslib/v2/pkg/logger"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
+	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
+	"github.com/barnowlsnest/stratus/cmd/config"
 	"github.com/barnowlsnest/stratus/cmd/server"
 	"github.com/barnowlsnest/stratus/internal/dedup"
-	"github.com/barnowlsnest/stratus/internal/ingester"
-	"github.com/barnowlsnest/stratus/internal/preloader"
 	"github.com/barnowlsnest/stratus/internal/storage"
 	"github.com/barnowlsnest/stratus/internal/stream"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 )
 
-const preCacheStartTimeout = 5 * time.Second
-
-type StratusConfig struct {
-	LogLevel         string        `name:"log_level" default:"info" usage:"log level for the application"`
-	WALDir           string        `name:"wal_dir" usage:"wal segments folder"`
-	DedupTTL         time.Duration `name:"dedup_ttl" default:"1m" usage:"deduplication window"`
-	MaxBatchReadSize int           `name:"max_batch_read_size" default:"1024" usage:"maximum number of records to read in a single batch"`
-	CacheSize        int           `name:"cache_size" default:"4096" usage:"preloader LRU capacity"`
-	Port             int           `name:"port" usage:"port to listen on"`
-	Host             string        `name:"host" default:"0.0.0.0" usage:"host to listen on"`
-}
+const stopTimeout = 5 * time.Second
 
 func main() {
-	var cfg StratusConfig
-	_, err := configs.Resolve(&cfg, "")
+	appCfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("failed to resolve config: %v", err)
+		log.Fatal("failed to load config: ", err)
 	}
 
-	w, r, err := wal.Open(cfg.WALDir,
-		wal.WithBatchSize(8),
-	)
+	mainCtx := context.Background()
+	sysCtx, sysCancel := signal.NotifyContext(mainCtx, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer sysCancel()
+
+	appLogger, err := newLogger(appCfg)
 	if err != nil {
-		log.Fatalf("failed to open WAL: %v", err)
+		log.Fatal("failed to create logger: ", err)
 	}
 
-	sharedlog.Info("wal opened",
-		sharedlog.F("bytesTruncated", r.BytesTruncated),
-		sharedlog.F("segmentsRemoved", r.SegmentsRemoved),
-	)
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
-
-	d := dedup.New(cfg.DedupTTL)
-	store, err := storage.New(
-		storage.WithWAL(w),
-		storage.WithDeduplicator(d),
-		storage.WithMaxReadBatchSize(cfg.MaxBatchReadSize),
-	)
+	w, err := newWAL(appCfg, appLogger)
 	if err != nil {
-		_ = w.Close()
-		log.Fatalf("failed to create storage: %v", err)
+		log.Fatal("failed to create WAL: ", err)
+	}
+	defer func() { _ = w.Close() }()
+
+	walStorage, err := newStorage(w, dedup.New(appCfg.DedupWindow))
+	if err != nil {
+		log.Fatal("failed to create storage: ", err)
 	}
 
-	in, err := ingester.New(ingester.WithStorage(store))
+	walStream, err := newStream(walStorage, lru.New[storage.Record](appCfg.CacheSize))
 	if err != nil {
-		_ = w.Close()
-		log.Fatalf("failed to create ingester: %v", err)
+		log.Fatal("failed to create stream: ", err)
 	}
 
-	pre, err := preloader.New(
-		preloader.WithStorage(store),
-		preloader.WithCache(lru.New[storage.Record](cfg.CacheSize)),
-	)
+	addr := net.JoinHostPort(appCfg.Host, strconv.Itoa(appCfg.Port))
+	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		_ = w.Close()
-		log.Fatalf("failed to create preloader: %v", err)
+		log.Fatal("failed to listen: ", err)
 	}
 
-	g, gCtx := errgroup.WithContext(ctx)
+	grpcServer := grpc.NewServer()
+	stratusv1.RegisterStreamServiceServer(grpcServer, server.New(walStream))
+
+	var g errgroup.Group
 	g.Go(func() error {
-		if err := pre.Start(gCtx, r.FirstLSN, r.LastLSN); err != nil {
-			sharedlog.Error(err, sharedlog.F("reason", "preloader start failed"))
-			return err
-		}
-
-		return nil
+		<-sysCtx.Done()
+		appLogger.Info(fmt.Sprintf("shutting down: %s", context.Cause(sysCtx).Error()))
+		grpcServer.GracefulStop()
+		return sysCtx.Err()
+	})
+	g.Go(func() error {
+		return walStream.Start(sysCtx)
 	})
 
-	if err := pre.WaitStarted(gCtx, preCacheStartTimeout); err != nil {
-		stop()
-		_ = w.Close()
-		log.Fatalf("preloader did not start: %v", err)
+	if err := walStream.WaitForStart(sysCtx); err != nil {
+		log.Fatal("failed to start stream: ", err)
 	}
 
-	cache, err := pre.Cache()
-	if err != nil {
-		stop()
-		_ = w.Close()
-		log.Fatalf("failed to create cache: %v", err)
-	}
-
-	str, err := stream.New(
-		stream.WithIngester(in),
-		stream.WithCache(cache),
-	)
-	if err != nil {
-		stop()
-		_ = w.Close()
-		log.Fatalf("failed to create stream: %v", err)
-	}
-
-	srv, err := server.New(
-		server.WithStream(str),
-		server.WithAddr(fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)),
-	)
-	if err != nil {
-		stop()
-		_ = w.Close()
-		log.Fatalf("failed to create server: %v", err)
-	}
+	appLogger.Info("stream is ready")
 
 	g.Go(func() error {
-		if err := srv.Run(gCtx); err != nil {
-			sharedlog.Error(err, sharedlog.F("reason", "server run failed"))
-			return err
-		}
-
-		return nil
+		appLogger.Info("grpc: serving", logger.Field{Key: "addr", Value: addr})
+		defer sysCancel()
+		return grpcServer.Serve(lis)
 	})
 
 	if err := g.Wait(); err != nil {
-		sharedlog.Error(err, sharedlog.F("reason", "unexpected failure"))
+		appLogger.Error(fmt.Sprintf("app error: %s", err.Error()))
 	}
 
-	sharedlog.Info("shutting down server")
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer stopCancel()
 
-	pre.Stop()
-	_ = w.Close()
+	appLogger.Info("stoping the stream: ", logger.Field{Key: "timeout", Value: stopTimeout.String()})
+	walStream.Stop(stopCtx)
+}
+
+func newLogger(cfg *config.Config) (*logger.Logger, error) {
+	level, err := logger.LogLevelFromString(cfg.LogLevel)
+	if err != nil {
+		return nil, err
+	}
+
+	appLogger := logger.New(logger.Config{
+		Level:      level,
+		Format:     logger.JSONFormat,
+		BufferSize: 0,
+		UseUTC:     true,
+	})
+
+	return appLogger, nil
+}
+
+func newWAL(appCfg *config.Config, appLogger *logger.Logger) (*wal.WAL, error) {
+	w, re, err := wal.Open(appCfg.WALDir,
+		wal.WithBatchSize(8),
+		wal.WithLogger(appLogger),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	appLogger.Info("wal: opened",
+		logger.Field{Key: "wal_dir", Value: appCfg.WALDir},
+		logger.Field{Key: "entries_recovered", Value: strconv.FormatInt(int64(re.EntriesRecovered), 10)},
+		logger.Field{Key: "segments_removed", Value: strconv.FormatInt(int64(re.SegmentsRemoved), 10)},
+		logger.Field{Key: "first_lsn", Value: strconv.FormatInt(int64(re.LastLSN), 10)},
+		logger.Field{Key: "last_lsn", Value: strconv.FormatInt(int64(re.LastLSN), 10)},
+	)
+
+	return w, nil
+}
+
+func newStorage(w *wal.WAL, d *dedup.Deduplicator) (*storage.Storage, error) {
+	return storage.New(
+		storage.WithDeduplicator(d),
+		storage.WithWAL(w),
+	)
+}
+
+func newStream(s *storage.Storage, cache *lru.LRU[storage.Record]) (*stream.Stream, error) {
+	return stream.New(
+		stream.WithStorage(s),
+		stream.WithCache(cache),
+		stream.WithSubscriberBuffer(1),
+	)
 }

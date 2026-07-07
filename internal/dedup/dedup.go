@@ -23,7 +23,7 @@ func (d *Deduplicator) Try(key uint64) error {
 	defer d.mux.Unlock()
 
 	if _, exists := d.recentKeys[key]; exists {
-		return ErrDuplicateChunk
+		return ErrDuplicate
 	}
 
 	d.recentKeys[key] = time.Now()
