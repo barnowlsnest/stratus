@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"sync"
-	
+
 	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
 	"github.com/barnowlsnest/stratus/internal/dedup"
@@ -21,21 +21,21 @@ type (
 		// Bytes is the raw payload of the record.
 		Bytes []byte
 	}
-	
+
 	Storage struct {
 		maxReadBatchSize int
 		wal              *wal.WAL
 		dup              *dedup.Deduplicator
 		subsWG           sync.WaitGroup
 	}
-	
+
 	BatchWriteResult struct {
 		DuplicatesCount uint64
 		WrittenCount    uint64
 		WrittenBytes    uint64
 		IDs             []uint64
 	}
-	
+
 	Option func(*Storage)
 )
 
@@ -62,13 +62,13 @@ func New(opts ...Option) (*Storage, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
-	
+
 	if err := s.validate(); err != nil {
 		return nil, err
 	}
-	
+
 	s.applyDefaults()
-	
+
 	return s, nil
 }
 
@@ -96,19 +96,19 @@ func (s *Storage) ClampRange(fromID, toID uint64) (from, to uint64, err error) {
 	if toID == 0 {
 		toID = last
 	}
-	
+
 	switch {
 	case toID < first, fromID > last, fromID > toID:
 		return 0, 0, ErrOutOfBounds
 	}
-	
+
 	if fromID < first {
 		fromID = first
 	}
 	if toID > last {
 		toID = last
 	}
-	
+
 	return fromID, toID, nil
 }
 
@@ -116,7 +116,7 @@ func (s *Storage) Write(ctx context.Context, records []*Record) (*BatchWriteResu
 	if len(records) == 0 {
 		return nil, ErrEmptyRecord
 	}
-	
+
 	var duplicates, written uint64
 	batch := make([][]byte, 0, len(records))
 	for _, record := range records {
@@ -125,38 +125,38 @@ func (s *Storage) Write(ctx context.Context, records []*Record) (*BatchWriteResu
 			return nil, ctx.Err()
 		default:
 		}
-		
+
 		if err := record.validate(); err != nil {
 			return nil, err
 		}
-		
+
 		if err := s.dup.Try(record.DedupKey); err != nil {
 			duplicates++
-			
+
 			continue
 		}
-		
+
 		batch = append(batch, record.Bytes)
 		written += uint64(len(record.Bytes))
 	}
-	
+
 	result := &BatchWriteResult{
 		DuplicatesCount: duplicates,
 		WrittenCount:    uint64(len(batch)),
 		WrittenBytes:    written,
 	}
-	
+
 	if len(batch) == 0 {
 		return result, nil
 	}
-	
+
 	ids, err := s.wal.AppendBatch(ctx, batch)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	result.IDs = ids
-	
+
 	return result, nil
 }
 
@@ -164,13 +164,13 @@ func (s *Storage) Read(ctx context.Context, fromID, toID uint64) ([]*Record, err
 	if err := s.validateRange(fromID, toID); err != nil {
 		return nil, err
 	}
-	
+
 	reader, err := s.wal.NewReader(fromID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = reader.Close() }()
-	
+
 	batch := make([]*Record, 0, toID-fromID+1)
 	for reader.Next() {
 		select {
@@ -178,24 +178,24 @@ func (s *Storage) Read(ctx context.Context, fromID, toID uint64) ([]*Record, err
 			return nil, ctx.Err()
 		default:
 		}
-		
+
 		entry, err := reader.Entry(), reader.Err()
 		if err != nil {
 			return nil, err
 		}
-		
+
 		if entry.LSN > toID {
 			break
 		}
-		
+
 		chunk := &Record{
 			ID:    entry.LSN,
 			Bytes: bytes.Clone(entry.Payload),
 		}
-		
+
 		batch = append(batch, chunk)
 	}
-	
+
 	return batch, nil
 }
 
@@ -208,7 +208,7 @@ func (s *Storage) Del(ctx context.Context, upToID uint64) error {
 	case s.wal.LastLSN() < upToID:
 		return ErrOutOfBounds
 	}
-	
+
 	return s.wal.CutOffsetContext(ctx, upToID)
 }
 
@@ -216,21 +216,21 @@ func (s *Storage) Subscribe(ctx context.Context, fromID uint64, buffer int) (rec
 	if buffer <= 0 {
 		buffer = 1
 	}
-	
+
 	f, err := s.wal.Follower(fromID, wal.WithFollow())
 	if err != nil {
 		closedCh := make(chan *Record)
 		close(closedCh)
 		return closedCh, err
 	}
-	
+
 	recordsCh := make(chan *Record, buffer)
 	s.subsWG.Go(func() {
 		defer close(recordsCh)
 		for entry := range f.RecordsChan(ctx) {
 			recordsCh <- &Record{ID: entry.LSN, Bytes: bytes.Clone(entry.Payload)}
 		}
-		
+
 		if errClose := f.Close(); errClose != nil {
 			sharedlog.Error(errClose)
 		}
@@ -238,7 +238,7 @@ func (s *Storage) Subscribe(ctx context.Context, fromID uint64, buffer int) (rec
 			sharedlog.Error(errFollower)
 		}
 	})
-	
+
 	return recordsCh, nil
 }
 
@@ -252,7 +252,7 @@ func (s *Storage) WaitSubscribersDone(ctx context.Context) {
 		defer close(done)
 		s.subsWG.Wait()
 	}()
-	
+
 	select {
 	case <-ctx.Done():
 		return
@@ -293,6 +293,6 @@ func (s *Storage) validateRange(fromID, toID uint64) error {
 	case s.wal.FirstLSN() > toID:
 		return ErrOutOfBounds
 	}
-	
+
 	return nil
 }

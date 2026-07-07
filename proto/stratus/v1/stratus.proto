@@ -50,8 +50,7 @@ message AddRequest {
 message AddResponse {
   Range added_records= 1;
   Range stream_records = 2;
-  uint64 dedup_key = 3;
-  repeated InputRecord duplicates = 5;
+  uint64 duplicate_records = 3;
 }
 
 message ReadResponse {
@@ -64,6 +63,5 @@ message DeleteRequest {
 
 message DeleteResponse {
     Range deleted_records = 1;
-    Range remaining_records = 2;
-    Range stream_records = 3;
+    Range stream_records = 2;
 }

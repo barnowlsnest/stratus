@@ -21,17 +21,17 @@ func New(ttl time.Duration) *Deduplicator {
 func (d *Deduplicator) Try(key uint64) error {
 	d.mux.Lock()
 	defer d.mux.Unlock()
-	
+
 	if _, exists := d.recentKeys[key]; exists {
 		return ErrDuplicate
 	}
-	
+
 	d.recentKeys[key] = time.Now()
 	time.AfterFunc(d.ttl, func() {
 		d.mux.Lock()
 		defer d.mux.Unlock()
 		delete(d.recentKeys, key)
 	})
-	
+
 	return nil
 }

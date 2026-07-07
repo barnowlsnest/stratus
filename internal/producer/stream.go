@@ -2,7 +2,7 @@ package producer
 
 import (
 	"context"
-	
+
 	"github.com/barnowlsnest/stratus/internal/storage"
 )
 

@@ -2,7 +2,7 @@ package config
 
 import (
 	"time"
-	
+
 	"github.com/barnowlsnest/go-configlib/v2/pkg/configs"
 )
 
@@ -22,6 +22,6 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &cfg, nil
 }

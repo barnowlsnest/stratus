@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"time"
-	
+
 	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
 	"github.com/barnowlsnest/stratus/internal/storage"
 )
@@ -18,7 +18,7 @@ type (
 		stop             context.CancelFunc
 		started          atomic.Bool
 	}
-	
+
 	// Item is a single stream entry.
 	Item struct {
 		// ID is the LSN assigned by the WAL. Zero on the write path; populated on reads.
@@ -26,20 +26,29 @@ type (
 		DedupKey uint64
 		RawBytes []byte
 	}
-	
+
 	Range struct {
 		first uint64
 		last  uint64
 	}
-	
+
 	AddResult struct {
 		StreamRange Range
 		AddedRange  Range
 		DedupCount  uint64
 	}
-	
+
+	DelResult struct {
+		StreamRange  Range
+		DeletedRange Range
+	}
+
 	Option func(*Stream)
 )
+
+func (r Range) First() uint64 { return r.first }
+
+func (r Range) Last() uint64 { return r.last }
 
 func NewItem(dedupKey uint64, rawBytes []byte) *Item {
 	return &Item{
@@ -71,11 +80,11 @@ func New(opts ...Option) (*Stream, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
-	
+
 	if err := s.validate(); err != nil {
 		return nil, err
 	}
-	
+
 	return s, nil
 }
 
@@ -83,29 +92,29 @@ func (s *Stream) Start(ctx context.Context) error {
 	if s.IsStarted() {
 		return ErrAlreadyStarted
 	}
-	
+
 	pCtx, pCancel := context.WithCancel(ctx)
 	s.stop = pCancel
-	
+
 	first, last := s.storage.Range()
-	
+
 	if first > 0 && last > 0 {
 		if err := s.fetchAndCacheRecords(pCtx, first, last); err != nil {
 			return err
 		}
 	}
-	
+
 	records, err := s.storage.Subscribe(pCtx, last, s.subscriberBuffer)
 	if err != nil {
 		return err
 	}
-	
+
 	s.started.Store(true)
 	for r := range records {
 		s.lru.Put(r.DedupKey, r)
 	}
 	s.started.Swap(false)
-	
+
 	return nil
 }
 
@@ -113,7 +122,7 @@ func (s *Stream) Stop(ctx context.Context) {
 	if !s.IsStarted() {
 		return
 	}
-	
+
 	s.stop()
 	s.storage.WaitSubscribersDone(ctx)
 	s.started.Swap(false)
@@ -122,7 +131,7 @@ func (s *Stream) Stop(ctx context.Context) {
 func (s *Stream) WaitForStart(ctx context.Context) error {
 	t := time.NewTicker(10 * time.Millisecond)
 	defer t.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -144,11 +153,11 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 	if err != nil {
 		return AddResult{}, err
 	}
-	
+
 	if res.DuplicatesCount == uint64(len(records)) {
 		return AddResult{}, ErrAllSkipped
 	}
-	
+
 	first, last := s.storage.Range()
 	result := AddResult{
 		StreamRange: Range{
@@ -161,7 +170,7 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 		},
 		DedupCount: res.DuplicatesCount,
 	}
-	
+
 	return result, nil
 }
 
@@ -170,43 +179,49 @@ func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Recor
 	if err != nil {
 		return nil, err
 	}
-	
+
 	records := make([]*storage.Record, 0, last-first+1)
 	for id := first; id <= last; id++ {
 		r, err := s.lazyLoadRecord(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		records = append(records, r)
 	}
-	
+
 	return records, nil
 }
 
-func (s *Stream) Del(ctx context.Context, upTo uint64) error {
+func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
 	oldFirst, oldLast := s.storage.Range()
 	if err := s.storage.Del(ctx, upTo); err != nil {
-		return err
+		return DelResult{}, err
 	}
-	
-	newFirst, _ := s.storage.Range()
+
+	newFirst, newLast := s.storage.Range()
 	evictBelow := newFirst
 	if newFirst == 0 {
 		evictBelow = oldLast + 1
 	}
-	if evictBelow <= oldFirst {
-		return nil
+
+	result := DelResult{
+		StreamRange: Range{first: newFirst, last: newLast},
 	}
-	
+	if evictBelow <= oldFirst {
+		return result, nil
+	}
+
+	result.DeletedRange = Range{first: oldFirst, last: evictBelow - 1}
+
 	keys := make([]uint64, 0, evictBelow-oldFirst)
 	for id := oldFirst; id < evictBelow; id++ {
 		keys = append(keys, id)
 	}
-	
+
 	s.lru.Delete(keys...)
-	
-	return nil
+
+	return result, nil
 }
 
 func (s *Stream) UpdateCache(ctx context.Context, fromID, toID uint64) error {
@@ -223,7 +238,7 @@ func (s *Stream) lazyLoadRecord(ctx context.Context, id uint64) (*storage.Record
 			return nil, err
 		}
 	}
-	
+
 	return record, nil
 }
 
@@ -232,10 +247,10 @@ func (s *Stream) readAndCacheRecord(ctx context.Context, id uint64) (*storage.Re
 	if err != nil {
 		return nil, err
 	}
-	
+
 	r := records[0]
 	s.lru.Put(id, r)
-	
+
 	return r, nil
 }
 
@@ -244,11 +259,11 @@ func (s *Stream) fetchAndCacheRecords(ctx context.Context, fromID, toID uint64) 
 	if err != nil {
 		return err
 	}
-	
+
 	for _, r := range records {
 		s.lru.Put(r.DedupKey, r)
 	}
-	
+
 	return nil
 }
 

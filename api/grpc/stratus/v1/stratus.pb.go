@@ -344,13 +344,12 @@ func (x *AddRequest) GetRecords() []*InputRecord {
 }
 
 type AddResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AddedRecords  *Range                 `protobuf:"bytes,1,opt,name=added_records,json=addedRecords,proto3" json:"added_records,omitempty"`
-	StreamRecords *Range                 `protobuf:"bytes,2,opt,name=stream_records,json=streamRecords,proto3" json:"stream_records,omitempty"`
-	DedupKey      uint64                 `protobuf:"varint,3,opt,name=dedup_key,json=dedupKey,proto3" json:"dedup_key,omitempty"`
-	Duplicates    []*InputRecord         `protobuf:"bytes,5,rep,name=duplicates,proto3" json:"duplicates,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	AddedRecords     *Range                 `protobuf:"bytes,1,opt,name=added_records,json=addedRecords,proto3" json:"added_records,omitempty"`
+	StreamRecords    *Range                 `protobuf:"bytes,2,opt,name=stream_records,json=streamRecords,proto3" json:"stream_records,omitempty"`
+	DuplicateRecords uint64                 `protobuf:"varint,3,opt,name=duplicate_records,json=duplicateRecords,proto3" json:"duplicate_records,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *AddResponse) Reset() {
@@ -397,18 +396,11 @@ func (x *AddResponse) GetStreamRecords() *Range {
 	return nil
 }
 
-func (x *AddResponse) GetDedupKey() uint64 {
+func (x *AddResponse) GetDuplicateRecords() uint64 {
 	if x != nil {
-		return x.DedupKey
+		return x.DuplicateRecords
 	}
 	return 0
-}
-
-func (x *AddResponse) GetDuplicates() []*InputRecord {
-	if x != nil {
-		return x.Duplicates
-	}
-	return nil
 }
 
 type ReadResponse struct {
@@ -500,12 +492,11 @@ func (x *DeleteRequest) GetEndId() uint64 {
 }
 
 type DeleteResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	DeletedRecords   *Range                 `protobuf:"bytes,1,opt,name=deleted_records,json=deletedRecords,proto3" json:"deleted_records,omitempty"`
-	RemainingRecords *Range                 `protobuf:"bytes,2,opt,name=remaining_records,json=remainingRecords,proto3" json:"remaining_records,omitempty"`
-	StreamRecords    *Range                 `protobuf:"bytes,3,opt,name=stream_records,json=streamRecords,proto3" json:"stream_records,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	DeletedRecords *Range                 `protobuf:"bytes,1,opt,name=deleted_records,json=deletedRecords,proto3" json:"deleted_records,omitempty"`
+	StreamRecords  *Range                 `protobuf:"bytes,2,opt,name=stream_records,json=streamRecords,proto3" json:"stream_records,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DeleteResponse) Reset() {
@@ -545,13 +536,6 @@ func (x *DeleteResponse) GetDeletedRecords() *Range {
 	return nil
 }
 
-func (x *DeleteResponse) GetRemainingRecords() *Range {
-	if x != nil {
-		return x.RemainingRecords
-	}
-	return nil
-}
-
 func (x *DeleteResponse) GetStreamRecords() *Range {
 	if x != nil {
 		return x.StreamRecords
@@ -585,22 +569,18 @@ const file_stratus_v1_stratus_proto_rawDesc = "" +
 	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"?\n" +
 	"\n" +
 	"AddRequest\x121\n" +
-	"\arecords\x18\x01 \x03(\v2\x17.stratus.v1.InputRecordR\arecords\"\xd5\x01\n" +
+	"\arecords\x18\x01 \x03(\v2\x17.stratus.v1.InputRecordR\arecords\"\xac\x01\n" +
 	"\vAddResponse\x126\n" +
 	"\radded_records\x18\x01 \x01(\v2\x11.stratus.v1.RangeR\faddedRecords\x128\n" +
-	"\x0estream_records\x18\x02 \x01(\v2\x11.stratus.v1.RangeR\rstreamRecords\x12\x1b\n" +
-	"\tdedup_key\x18\x03 \x01(\x04R\bdedupKey\x127\n" +
-	"\n" +
-	"duplicates\x18\x05 \x03(\v2\x17.stratus.v1.InputRecordR\n" +
-	"duplicates\"B\n" +
+	"\x0estream_records\x18\x02 \x01(\v2\x11.stratus.v1.RangeR\rstreamRecords\x12+\n" +
+	"\x11duplicate_records\x18\x03 \x01(\x04R\x10duplicateRecords\"B\n" +
 	"\fReadResponse\x122\n" +
 	"\arecords\x18\x01 \x03(\v2\x18.stratus.v1.OutputRecordR\arecords\"&\n" +
 	"\rDeleteRequest\x12\x15\n" +
-	"\x06end_id\x18\x01 \x01(\x04R\x05endId\"\xc6\x01\n" +
+	"\x06end_id\x18\x01 \x01(\x04R\x05endId\"\x86\x01\n" +
 	"\x0eDeleteResponse\x12:\n" +
-	"\x0fdeleted_records\x18\x01 \x01(\v2\x11.stratus.v1.RangeR\x0edeletedRecords\x12>\n" +
-	"\x11remaining_records\x18\x02 \x01(\v2\x11.stratus.v1.RangeR\x10remainingRecords\x128\n" +
-	"\x0estream_records\x18\x03 \x01(\v2\x11.stratus.v1.RangeR\rstreamRecords2\x94\x02\n" +
+	"\x0fdeleted_records\x18\x01 \x01(\v2\x11.stratus.v1.RangeR\x0edeletedRecords\x128\n" +
+	"\x0estream_records\x18\x02 \x01(\v2\x11.stratus.v1.RangeR\rstreamRecords2\x94\x02\n" +
 	"\rStreamService\x12?\n" +
 	"\x06Delete\x12\x19.stratus.v1.DeleteRequest\x1a\x1a.stratus.v1.DeleteResponse\x126\n" +
 	"\x03Add\x12\x16.stratus.v1.AddRequest\x1a\x17.stratus.v1.AddResponse\x12C\n" +
@@ -640,24 +620,22 @@ var file_stratus_v1_stratus_proto_depIdxs = []int32{
 	0,  // 2: stratus.v1.AddRequest.records:type_name -> stratus.v1.InputRecord
 	1,  // 3: stratus.v1.AddResponse.added_records:type_name -> stratus.v1.Range
 	1,  // 4: stratus.v1.AddResponse.stream_records:type_name -> stratus.v1.Range
-	0,  // 5: stratus.v1.AddResponse.duplicates:type_name -> stratus.v1.InputRecord
-	2,  // 6: stratus.v1.ReadResponse.records:type_name -> stratus.v1.OutputRecord
-	1,  // 7: stratus.v1.DeleteResponse.deleted_records:type_name -> stratus.v1.Range
-	1,  // 8: stratus.v1.DeleteResponse.remaining_records:type_name -> stratus.v1.Range
-	1,  // 9: stratus.v1.DeleteResponse.stream_records:type_name -> stratus.v1.Range
-	8,  // 10: stratus.v1.StreamService.Delete:input_type -> stratus.v1.DeleteRequest
-	5,  // 11: stratus.v1.StreamService.Add:input_type -> stratus.v1.AddRequest
-	4,  // 12: stratus.v1.StreamService.ReadRange:input_type -> stratus.v1.ReadRangeRequest
-	3,  // 13: stratus.v1.StreamService.ReadOffset:input_type -> stratus.v1.ReadOffsetRequest
-	9,  // 14: stratus.v1.StreamService.Delete:output_type -> stratus.v1.DeleteResponse
-	6,  // 15: stratus.v1.StreamService.Add:output_type -> stratus.v1.AddResponse
-	7,  // 16: stratus.v1.StreamService.ReadRange:output_type -> stratus.v1.ReadResponse
-	7,  // 17: stratus.v1.StreamService.ReadOffset:output_type -> stratus.v1.ReadResponse
-	14, // [14:18] is the sub-list for method output_type
-	10, // [10:14] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	2,  // 5: stratus.v1.ReadResponse.records:type_name -> stratus.v1.OutputRecord
+	1,  // 6: stratus.v1.DeleteResponse.deleted_records:type_name -> stratus.v1.Range
+	1,  // 7: stratus.v1.DeleteResponse.stream_records:type_name -> stratus.v1.Range
+	8,  // 8: stratus.v1.StreamService.Delete:input_type -> stratus.v1.DeleteRequest
+	5,  // 9: stratus.v1.StreamService.Add:input_type -> stratus.v1.AddRequest
+	4,  // 10: stratus.v1.StreamService.ReadRange:input_type -> stratus.v1.ReadRangeRequest
+	3,  // 11: stratus.v1.StreamService.ReadOffset:input_type -> stratus.v1.ReadOffsetRequest
+	9,  // 12: stratus.v1.StreamService.Delete:output_type -> stratus.v1.DeleteResponse
+	6,  // 13: stratus.v1.StreamService.Add:output_type -> stratus.v1.AddResponse
+	7,  // 14: stratus.v1.StreamService.ReadRange:output_type -> stratus.v1.ReadResponse
+	7,  // 15: stratus.v1.StreamService.ReadOffset:output_type -> stratus.v1.ReadResponse
+	12, // [12:16] is the sub-list for method output_type
+	8,  // [8:12] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_stratus_v1_stratus_proto_init() }

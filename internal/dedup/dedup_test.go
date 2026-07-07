@@ -3,7 +3,7 @@ package dedup
 import (
 	"testing"
 	"time"
-	
+
 	"github.com/stretchr/testify/suite"
 )
 
