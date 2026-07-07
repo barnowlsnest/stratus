@@ -1,122 +1,69 @@
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
 package stratus.v1;
 
-option go_package = "github.com/barnowlsnest/stratus/pkg/client/gen/stratus/v1;stratusv1";
+option go_package = "github.com/barnowlsnest/stratus/api/grpc/v1;stratusv1";
 
-// StreamService exposes a single WAL as two bidirectional streams.
 service StreamService {
-  // Write appends records. Single and batch are distinct requests; both reply
-  // with the assigned LSN range.
-  rpc Write(stream WriteRequest) returns (stream WriteResponse);
-  // Read returns records by id (XREAD) or bounded range (XRANGE).
-  rpc Read(stream ReadRequest) returns (stream ReadResponse);
-  // CutOffset requests removal of records up to and including up_to; WAL
-  // reclamation is segment-based and best-effort.
-  rpc CutOffset(CutOffsetRequest) returns (CutOffsetResponse);
-  // GetMetadata returns a flat snapshot of the stream's metadata.
-  rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse);
-  // UpdateCache requests that the preloader refresh its cache from the ingester.
-  rpc UpdateCache(UpdateCacheRequest) returns (UpdateCacheResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Add(AddRequest) returns (AddResponse);
+  rpc ReadRange(ReadRangeRequest) returns (ReadResponse);
+  rpc ReadOffset(ReadOffsetRequest) returns (ReadResponse);
 }
 
-message Record {
+message InputRecord {
   uint64 dedup_key = 1;
-  bytes payload = 2;
-}
-
-message RecordBatch {
-  repeated Record records = 1;
-}
-
-message WriteRequest {
-  oneof payload {
-    Record record = 1;      // single append
-    RecordBatch batch = 2;  // batch append
-  }
-}
-
-// Err classifies a recoverable per-request failure sent on the stream.
-enum Err {
-  ERR_UNKNOWN = 0;
-  ERR_INVALID_ARGUMENT = 1;
-  ERR_NOT_FOUND = 2;
-  ERR_ALREADY_EXISTS = 3;
-  ERR_OUT_OF_RANGE = 4;
-}
-
-// Error reports a recoverable failure of a single request; the stream stays
-// connected. first_lsn/last_lsn carry the available WAL bounds for
-// ERR_OUT_OF_RANGE and ERR_NOT_FOUND (0 = unset).
-message Error {
-  Err code = 1;
-  string message = 2;
-  uint64 first_lsn = 3;
-  uint64 last_lsn = 4;
-}
-
-message WriteResponse {
-  uint64 start = 1;
-  uint64 end = 2; // == start for a single record
-  Error error = 3; // set instead of start/end when the request failed recoverably
+  reserved 2 to 15;
+  bytes raw_data = 16;
 }
 
 message Range {
-  uint64 first = 1;
-  uint64 last = 2;
+  uint64 start = 1;
+  uint64 end = 2;
 }
 
-message ReadRequest {
-  oneof query {
-    uint64 id = 1;     // read one entry by LSN
-    Range range = 2;   // read a bounded LSN range
-  }
+message OutputRecord {
+  uint64 id = 1;
+  reserved 2 to 15;
+  bytes raw_data = 16;
 }
 
-message Entry {
-  uint64 id = 1; // LSN
-  bytes payload = 2;
+message ReadOffsetRequest {
+  uint64 start_id = 1;
+  uint64 max_records = 2;
+  google.protobuf.Duration timeout = 3;
+}
+
+message ReadRangeRequest {
+  uint64 start_id = 1;
+  uint64 end_id = 2;
+  google.protobuf.Duration timeout = 3;
+}
+
+message AddRequest {
+  repeated InputRecord records = 1;
+}
+
+message AddResponse {
+  Range added_records= 1;
+  Range stream_records = 2;
+  uint64 dedup_key = 3;
+  repeated InputRecord duplicates = 5;
 }
 
 message ReadResponse {
-  repeated Entry entries = 1;
-  Error error = 2; // set instead of entries when the request failed recoverably
+  repeated OutputRecord records = 1;
 }
 
-message CutOffsetRequest {
-  uint64 up_to = 1; // requests removal of records up to and including this LSN (best-effort)
+message DeleteRequest {
+  uint64 end_id = 1;
 }
 
-message CutOffsetResponse {
-  uint64 first = 1; // first LSN whose removal was requested
-  uint64 last = 2;  // last LSN whose removal was requested (== up_to)
-}
-
-message GetMetadataRequest {}
-
-// GetMetadataResponse is a flat view of stream.Metadata: preloader fields
-// followed by ingester fields.
-message GetMetadataResponse {
-  // preloader
-  uint64 storage_size = 1;
-  uint64 cache_size = 2;
-  uint64 first_id = 3;
-  uint64 last_id = 4;
-  // ingester
-  uint64 bytes_written = 5;
-  uint64 duplicates_count = 6;
-  uint64 writes_count = 7;
-  double writes_per_second = 8;
-  double duration_seconds = 9;
-  uint64 truncate_claims_count = 10; // number of Truncate calls
-  int64 last_truncate_claim_at_unix = 11; // unix seconds; 0 if never truncated
-}
-
-message UpdateCacheRequest {
-  uint64 first = 1;
-  uint64 last = 2;
-}
-
-message UpdateCacheResponse {
-  Error error = 1;
+message DeleteResponse {
+    Range deleted_records = 1;
+    Range remaining_records = 2;
+    Range stream_records = 3;
 }

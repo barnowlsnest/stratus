@@ -5,6 +5,8 @@ import (
 )
 
 var (
-	ErrNilIngester = errors.New("stream: nil ingester")
-	ErrNilCache    = errors.New("stream: nil cache")
+	ErrAlreadyStarted = errors.New("stream: already started")
+	ErrAllSkipped     = errors.New("stream: all records skipped as duplicates")
+	ErrNilStorage     = errors.New("stream: nil storage")
+	ErrNilCache       = errors.New("stream: nil cache")
 )
