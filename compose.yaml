@@ -3,13 +3,20 @@ services:
     image: barnowlsnest/stratus:latest
     container_name: stratus
     restart: on-failure
+    networks:
+        - stratus_net
     ports:
-      - '8000:8000'
+      - "8000:8000"
     volumes:
       - stratus_wal:/app/config
     environment:
+      - HOST=0.0.0.0
       - LOG_LEVEL=debug
       - WAL_DIR=/usr/wal
 
 volumes:
   stratus_wal:
+
+networks:
+  stratus_net:
+    driver: bridge
