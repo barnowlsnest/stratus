@@ -224,10 +224,6 @@ func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
 	return result, nil
 }
 
-func (s *Stream) UpdateCache(ctx context.Context, fromID, toID uint64) error {
-	return s.fetchAndCacheRecords(ctx, fromID, toID)
-}
-
 func (s *Stream) lazyLoadRecord(ctx context.Context, id uint64) (*storage.Record, error) {
 	record, err := s.lru.Get(id)
 	if err != nil {

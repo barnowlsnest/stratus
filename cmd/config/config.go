@@ -9,7 +9,7 @@ import (
 type Config struct {
 	LogLevel         string        `name:"log_level" default:"info" usage:"log level for the application"`
 	WALDir           string        `name:"wal_dir" usage:"wal segments folder"`
-	Host             string        `name:"host" default:"0.0.0.0" usage:"host to listen on"`
+	Host             string        `name:"host" default:"127.0.0.1" usage:"host to listen on"`
 	DedupWindow      time.Duration `name:"dedup_window" default:"1m" usage:"deduplication window"`
 	MaxBatchReadSize int           `name:"max_batch_read_size" default:"1024" usage:"maximum number of records to read in a single batch"`
 	CacheSize        int           `name:"cache_size" default:"4096" usage:"preloader LRU capacity"`

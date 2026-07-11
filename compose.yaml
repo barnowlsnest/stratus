@@ -1,0 +1,15 @@
+services:
+  stratus:
+    image: barnowlsnest/stratus:latest
+    container_name: stratus
+    restart: on-failure
+    ports:
+      - '8000:8000'
+    volumes:
+      - stratus_wal:/app/config
+    environment:
+      - LOG_LEVEL=debug
+      - WAL_DIR=/usr/wal
+
+volumes:
+  stratus_wal:

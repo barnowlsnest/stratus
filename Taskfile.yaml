@@ -3,14 +3,30 @@ version: '3'
 
 vars:
   ALL: ./...
+  DIST: ./dist/
+  MAIN: ./cmd/stratus.go
+  IMAGE: barnowlsnest/stratus
+  TAG: '{{.TAG | default "latest"}}'
 
 tasks:
-  gen:
-    desc: Generate gRPC code from proto
+  buf-build:
+    desc: Build buf
     cmds:
       - buf dep update
       - buf build
+
+  buf-gen:
+    desc: Generate gRPC code from proto
+    cmds:
       - buf generate
+
+  go-build:
+    deps:
+      - sanity
+    cmds:
+      - rm -rf '{{.DIST}}'
+      - mkdir -p '{{.DIST}}'
+      - go build -o '{{.DIST}}' '{{.MAIN}}'
 
   go-fmt:
     cmds:
@@ -34,3 +50,19 @@ tasks:
       - task: go-vet
       - task: go-lint
       - task: go-test
+
+  clear:
+    cmds:
+      - rm -rf '{{.DIST}}'
+
+  docker-build:
+    deps:
+      - sanity
+    cmds:
+      - docker build -t {{.IMAGE}}:{{.TAG}} .
+
+  docker-push:
+    deps:
+      - sanity
+    cmds:
+      - docker push {{.IMAGE}}:{{.TAG}}

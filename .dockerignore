@@ -1,0 +1,7 @@
+.claude/
+dist/
+Dockerfile
+Taskfile.yml
+LICENSE
+compose.yaml
+.gitignore
