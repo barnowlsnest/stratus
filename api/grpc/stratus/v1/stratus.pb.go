@@ -580,13 +580,13 @@ const file_stratus_v1_stratus_proto_rawDesc = "" +
 	"\x06end_id\x18\x01 \x01(\x04R\x05endId\"\x86\x01\n" +
 	"\x0eDeleteResponse\x12:\n" +
 	"\x0fdeleted_records\x18\x01 \x01(\v2\x11.stratus.v1.RangeR\x0edeletedRecords\x128\n" +
-	"\x0estream_records\x18\x02 \x01(\v2\x11.stratus.v1.RangeR\rstreamRecords2\x94\x02\n" +
+	"\x0estream_records\x18\x02 \x01(\v2\x11.stratus.v1.RangeR\rstreamRecords2\x96\x02\n" +
 	"\rStreamService\x12?\n" +
 	"\x06Delete\x12\x19.stratus.v1.DeleteRequest\x1a\x1a.stratus.v1.DeleteResponse\x126\n" +
 	"\x03Add\x12\x16.stratus.v1.AddRequest\x1a\x17.stratus.v1.AddResponse\x12C\n" +
-	"\tReadRange\x12\x1c.stratus.v1.ReadRangeRequest\x1a\x18.stratus.v1.ReadResponse\x12E\n" +
+	"\tReadRange\x12\x1c.stratus.v1.ReadRangeRequest\x1a\x18.stratus.v1.ReadResponse\x12G\n" +
 	"\n" +
-	"ReadOffset\x12\x1d.stratus.v1.ReadOffsetRequest\x1a\x18.stratus.v1.ReadResponseB7Z5github.com/barnowlsnest/stratus/api/grpc/v1;stratusv1b\x06proto3"
+	"ReadOffset\x12\x1d.stratus.v1.ReadOffsetRequest\x1a\x18.stratus.v1.ReadResponse0\x01B7Z5github.com/barnowlsnest/stratus/api/grpc/v1;stratusv1b\x06proto3"
 
 var (
 	file_stratus_v1_stratus_proto_rawDescOnce sync.Once

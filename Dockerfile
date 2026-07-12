@@ -7,7 +7,7 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath -ldflags="-s -w" \
-    -o ./dist/ ./cmd/stratus.go
+    -o ./dist/ ./cmd/app/stratus.go
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /usr/wal

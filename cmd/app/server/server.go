@@ -3,13 +3,23 @@ package server
 import (
 	"context"
 	"errors"
+	"time"
 
 	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"github.com/barnowlsnest/stratus/internal/storage"
 	"github.com/barnowlsnest/stratus/internal/stream"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
+)
+
+// readOffsetMinTimeout / readOffsetMaxTimeout bound ReadOffsetRequest.timeout,
+// and readOffsetPollEvery is how often ReadOffset retries while the stream
+// catches up to the requested range. They are vars so tests can shrink them.
+var (
+	readOffsetMinTimeout = 61 * time.Millisecond
+	readOffsetMaxTimeout = 5 * time.Hour
 )
 
 type (
@@ -17,6 +27,8 @@ type (
 		Add(ctx context.Context, records []*storage.Record) (stream.AddResult, error)
 		Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error)
 		Del(ctx context.Context, upTo uint64) (stream.DelResult, error)
+		Range() (first, last uint64)
+		DataReady() <-chan struct{}
 	}
 
 	Server struct {
@@ -60,26 +72,56 @@ func (s *Server) ReadRange(ctx context.Context, req *stratusv1.ReadRangeRequest)
 	return &stratusv1.ReadResponse{Records: toOutputRecords(records)}, nil
 }
 
-func (s *Server) ReadOffset(ctx context.Context, req *stratusv1.ReadOffsetRequest) (*stratusv1.ReadResponse, error) {
+func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStreamingServer[stratusv1.ReadResponse]) error {
 	if req.GetMaxRecords() == 0 {
-		return nil, status.Error(codes.InvalidArgument, "max_records must be greater than zero")
+		return status.Error(codes.InvalidArgument, "max_records must be greater than zero")
 	}
 
-	ctx, cancel := withTimeout(ctx, req.GetTimeout())
+	requested := req.GetTimeout().AsDuration()
+	if requested > readOffsetMaxTimeout {
+		return status.Error(codes.InvalidArgument, "timeout must not exceed "+readOffsetMaxTimeout.String())
+	}
+
+	ctx, cancel := context.WithTimeout(str.Context(), max(readOffsetMinTimeout, requested))
 	defer cancel()
 
 	startID := req.GetStartId()
 	endID := startID + req.GetMaxRecords() - 1
-	if endID < startID { // uint64 overflow: clamp to the end of the stream.
+	if endID < startID {
 		endID = ^uint64(0)
 	}
 
-	records, err := s.stream.Get(ctx, startID, endID)
-	if err != nil {
-		return nil, toStatus(err)
+	nextID := startID
+	for nextID <= endID {
+		ready := s.stream.DataReady()
+		recs, err := s.stream.Get(ctx, nextID, endID)
+		switch {
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			return nil
+		case errors.Is(err, storage.ErrOutOfBounds):
+			if first, _ := s.stream.Range(); first > 0 && nextID < first {
+				return toStatus(err)
+			}
+		case err != nil:
+			return toStatus(err)
+		}
+
+		if len(recs) > 0 {
+			if err := str.Send(&stratusv1.ReadResponse{Records: toOutputRecords(recs)}); err != nil {
+				return err
+			}
+			nextID += uint64(len(recs))
+			continue
+		}
+
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return nil
+		}
 	}
 
-	return &stratusv1.ReadResponse{Records: toOutputRecords(records)}, nil
+	return nil
 }
 
 func (s *Server) Delete(ctx context.Context, req *stratusv1.DeleteRequest) (*stratusv1.DeleteResponse, error) {

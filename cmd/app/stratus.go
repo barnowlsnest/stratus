@@ -14,8 +14,8 @@ import (
 	"github.com/barnowlsnest/go-logslib/v2/pkg/logger"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
 	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
-	"github.com/barnowlsnest/stratus/cmd/config"
-	"github.com/barnowlsnest/stratus/cmd/server"
+	"github.com/barnowlsnest/stratus/cmd/app/config"
+	"github.com/barnowlsnest/stratus/cmd/app/server"
 	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/barnowlsnest/stratus/internal/storage"
 	"github.com/barnowlsnest/stratus/internal/stream"
@@ -23,7 +23,10 @@ import (
 	"google.golang.org/grpc"
 )
 
-const stopTimeout = 5 * time.Second
+const (
+	stopTimeout  = 5 * time.Second
+	startTimeout = 30 * time.Second
+)
 
 func main() {
 	appCfg, err := config.Load()
@@ -76,7 +79,7 @@ func main() {
 		return walStream.Start(sysCtx)
 	})
 
-	if err := walStream.WaitForStart(sysCtx); err != nil {
+	if err := walStream.WaitForStart(sysCtx, startTimeout); err != nil {
 		log.Fatal("failed to start stream: ", err)
 	}
 
@@ -107,7 +110,7 @@ func newLogger(cfg *config.Config) (*logger.Logger, error) {
 
 	appLogger := logger.New(logger.Config{
 		Level:      level,
-		Format:     logger.JSONFormat,
+		Format:     logger.TextFormat,
 		BufferSize: 0,
 		UseUTC:     true,
 	})

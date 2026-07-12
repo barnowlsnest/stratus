@@ -6,9 +6,10 @@ package stratusv1
 import (
 	"context"
 	"time"
-	
+
 	pb "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Client is a Stratus StreamService client.
@@ -30,8 +31,12 @@ func Dial(target string, opts ...grpc.DialOption) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &Client{svc: pb.NewStreamServiceClient(conn), conn: conn}, nil
+}
+
+func WithInsecure() grpc.DialOption {
+	return grpc.WithTransportCredentials(insecure.NewCredentials())
 }
 
 // Close closes the underlying connection when the client owns it (created via
@@ -40,7 +45,7 @@ func (c *Client) Close() error {
 	if c.conn == nil {
 		return nil
 	}
-	
+
 	return c.conn.Close()
 }
 
@@ -51,7 +56,7 @@ func (c *Client) Add(ctx context.Context, records []InputRecord) (AddResult, err
 	if err != nil {
 		return AddResult{}, err
 	}
-	
+
 	return AddResult{
 		AddedRecords:     fromProtoRange(resp.GetAddedRecords()),
 		StreamRecords:    fromProtoRange(resp.GetStreamRecords()),
@@ -70,13 +75,13 @@ func (c *Client) ReadRange(ctx context.Context, startID, endID uint64, timeout t
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return fromProtoOutputRecords(resp.GetRecords()), nil
 }
 
 // ReadOffset returns up to maxRecords records starting at startID. A
 // non-positive timeout leaves the read bounded only by ctx.
-func (c *Client) ReadOffset(ctx context.Context, startID, maxRecords uint64, timeout time.Duration) ([]OutputRecord, error) {
+func (c *Client) ReadOffset(ctx context.Context, startID, maxRecords uint64, timeout time.Duration) (<-chan OutputRecord, error) {
 	resp, err := c.svc.ReadOffset(ctx, &pb.ReadOffsetRequest{
 		StartId:    startID,
 		MaxRecords: maxRecords,
@@ -85,8 +90,35 @@ func (c *Client) ReadOffset(ctx context.Context, startID, maxRecords uint64, tim
 	if err != nil {
 		return nil, err
 	}
-	
-	return fromProtoOutputRecords(resp.GetRecords()), nil
+
+	out := make(chan OutputRecord, maxRecords)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-resp.Context().Done():
+				return
+			default:
+				msg, err := resp.Recv()
+				if err != nil {
+					return
+				}
+				for _, r := range msg.GetRecords() {
+					select {
+					case <-resp.Context().Done():
+						return
+					case out <- OutputRecord{
+						ID:      r.GetId(),
+						RawData: r.GetRawData(),
+					}:
+					}
+				}
+			}
+		}
+	}()
+
+	// return fromProtoOutputRecords(resp.GetRecords()), nil
+	return out, nil
 }
 
 // Delete removes records with IDs up to and including endID, reporting the
@@ -96,7 +128,7 @@ func (c *Client) Delete(ctx context.Context, endID uint64) (DeleteResult, error)
 	if err != nil {
 		return DeleteResult{}, err
 	}
-	
+
 	return DeleteResult{
 		DeletedRecords: fromProtoRange(resp.GetDeletedRecords()),
 		StreamRecords:  fromProtoRange(resp.GetStreamRecords()),

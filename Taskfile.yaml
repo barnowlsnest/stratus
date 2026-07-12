@@ -3,8 +3,8 @@ version: '3'
 
 vars:
   ALL: ./...
-  DIST: ./dist/
-  MAIN: ./cmd/stratus.go
+  DIST: ./dist
+  CMD_ROOT: ./cmd
   IMAGE: barnowlsnest/stratus
   TAG: '{{.TAG | default "latest"}}'
 
@@ -26,7 +26,7 @@ tasks:
     cmds:
       - rm -rf '{{.DIST}}'
       - mkdir -p '{{.DIST}}'
-      - go build -o '{{.DIST}}' '{{.MAIN}}'
+      - go build -o '{{.DIST}}' '{{.CMD_ROOT}}/app/stratus.go'
 
   go-fmt:
     cmds:

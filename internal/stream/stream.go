@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +18,9 @@ type (
 		lru              *lru.LRU[storage.Record]
 		stop             context.CancelFunc
 		started          atomic.Bool
+		mu               sync.RWMutex
+		newDataReadySig  chan struct{}
+		startedChan      chan struct{}
 	}
 
 	// Item is a single stream entry.
@@ -76,7 +80,10 @@ func WithSubscriberBuffer(buffer int) Option {
 }
 
 func New(opts ...Option) (*Stream, error) {
-	s := &Stream{}
+	s := &Stream{
+		startedChan:     make(chan struct{}),
+		newDataReadySig: make(chan struct{}),
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -86,6 +93,12 @@ func New(opts ...Option) (*Stream, error) {
 	}
 
 	return s, nil
+}
+
+func (s *Stream) DataReady() <-chan struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.newDataReadySig
 }
 
 func (s *Stream) Start(ctx context.Context) error {
@@ -109,11 +122,16 @@ func (s *Stream) Start(ctx context.Context) error {
 		return err
 	}
 
+	s.mu.Lock()
+	close(s.startedChan)
+	s.mu.Unlock()
 	s.started.Store(true)
 	for r := range records {
-		s.lru.Put(r.DedupKey, r)
+		s.lru.Put(r.ID, r)
+		s.notify()
 	}
 	s.started.Swap(false)
+	s.notify()
 
 	return nil
 }
@@ -125,22 +143,21 @@ func (s *Stream) Stop(ctx context.Context) {
 
 	s.stop()
 	s.storage.WaitSubscribersDone(ctx)
+	s.mu.Lock()
+	s.startedChan = make(chan struct{})
+	s.mu.Unlock()
 	s.started.Swap(false)
 }
 
-func (s *Stream) WaitForStart(ctx context.Context) error {
-	t := time.NewTicker(10 * time.Millisecond)
-	defer t.Stop()
+func (s *Stream) WaitForStart(ctx context.Context, timeout time.Duration) error {
+	tCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.C:
-			if s.IsStarted() {
-				return nil
-			}
-		}
+	select {
+	case <-tCtx.Done():
+		return tCtx.Err()
+	case <-s.startedSignal():
+		return nil
 	}
 }
 
@@ -172,6 +189,12 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 	}
 
 	return result, nil
+}
+
+// Range returns the inclusive ID window currently retained by the stream.
+// first is 0 when the stream is empty.
+func (s *Stream) Range() (first, last uint64) {
+	return s.storage.Range()
 }
 
 func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error) {
@@ -220,6 +243,7 @@ func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
 	}
 
 	s.lru.Delete(keys...)
+	s.notify()
 
 	return result, nil
 }
@@ -257,7 +281,7 @@ func (s *Stream) fetchAndCacheRecords(ctx context.Context, fromID, toID uint64) 
 	}
 
 	for _, r := range records {
-		s.lru.Put(r.DedupKey, r)
+		s.lru.Put(r.ID, r)
 	}
 
 	return nil
@@ -272,4 +296,18 @@ func (s *Stream) validate() error {
 	default:
 		return nil
 	}
+}
+
+func (s *Stream) notify() {
+	s.mu.Lock()
+	prev := s.newDataReadySig
+	s.newDataReadySig = make(chan struct{})
+	s.mu.Unlock()
+	close(prev)
+}
+
+func (s *Stream) startedSignal() <-chan struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.startedChan
 }

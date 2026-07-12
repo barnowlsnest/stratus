@@ -11,7 +11,7 @@ service StreamService {
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc Add(AddRequest) returns (AddResponse);
   rpc ReadRange(ReadRangeRequest) returns (ReadResponse);
-  rpc ReadOffset(ReadOffsetRequest) returns (ReadResponse);
+  rpc ReadOffset(ReadOffsetRequest) returns (stream ReadResponse);
 }
 
 message InputRecord {

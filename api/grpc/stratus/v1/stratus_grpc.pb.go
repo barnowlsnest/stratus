@@ -32,7 +32,7 @@ type StreamServiceClient interface {
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*AddResponse, error)
 	ReadRange(ctx context.Context, in *ReadRangeRequest, opts ...grpc.CallOption) (*ReadResponse, error)
-	ReadOffset(ctx context.Context, in *ReadOffsetRequest, opts ...grpc.CallOption) (*ReadResponse, error)
+	ReadOffset(ctx context.Context, in *ReadOffsetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadResponse], error)
 }
 
 type streamServiceClient struct {
@@ -73,15 +73,24 @@ func (c *streamServiceClient) ReadRange(ctx context.Context, in *ReadRangeReques
 	return out, nil
 }
 
-func (c *streamServiceClient) ReadOffset(ctx context.Context, in *ReadOffsetRequest, opts ...grpc.CallOption) (*ReadResponse, error) {
+func (c *streamServiceClient) ReadOffset(ctx context.Context, in *ReadOffsetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ReadResponse)
-	err := c.cc.Invoke(ctx, StreamService_ReadOffset_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &StreamService_ServiceDesc.Streams[0], StreamService_ReadOffset_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &grpc.GenericClientStream[ReadOffsetRequest, ReadResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type StreamService_ReadOffsetClient = grpc.ServerStreamingClient[ReadResponse]
 
 // StreamServiceServer is the server API for StreamService service.
 // All implementations must embed UnimplementedStreamServiceServer
@@ -90,7 +99,7 @@ type StreamServiceServer interface {
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	Add(context.Context, *AddRequest) (*AddResponse, error)
 	ReadRange(context.Context, *ReadRangeRequest) (*ReadResponse, error)
-	ReadOffset(context.Context, *ReadOffsetRequest) (*ReadResponse, error)
+	ReadOffset(*ReadOffsetRequest, grpc.ServerStreamingServer[ReadResponse]) error
 	mustEmbedUnimplementedStreamServiceServer()
 }
 
@@ -110,8 +119,8 @@ func (UnimplementedStreamServiceServer) Add(context.Context, *AddRequest) (*AddR
 func (UnimplementedStreamServiceServer) ReadRange(context.Context, *ReadRangeRequest) (*ReadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReadRange not implemented")
 }
-func (UnimplementedStreamServiceServer) ReadOffset(context.Context, *ReadOffsetRequest) (*ReadResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReadOffset not implemented")
+func (UnimplementedStreamServiceServer) ReadOffset(*ReadOffsetRequest, grpc.ServerStreamingServer[ReadResponse]) error {
+	return status.Error(codes.Unimplemented, "method ReadOffset not implemented")
 }
 func (UnimplementedStreamServiceServer) mustEmbedUnimplementedStreamServiceServer() {}
 func (UnimplementedStreamServiceServer) testEmbeddedByValue()                       {}
@@ -188,23 +197,16 @@ func _StreamService_ReadRange_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _StreamService_ReadOffset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReadOffsetRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _StreamService_ReadOffset_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(ReadOffsetRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(StreamServiceServer).ReadOffset(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: StreamService_ReadOffset_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StreamServiceServer).ReadOffset(ctx, req.(*ReadOffsetRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(StreamServiceServer).ReadOffset(m, &grpc.GenericServerStream[ReadOffsetRequest, ReadResponse]{ServerStream: stream})
 }
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type StreamService_ReadOffsetServer = grpc.ServerStreamingServer[ReadResponse]
 
 // StreamService_ServiceDesc is the grpc.ServiceDesc for StreamService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -225,11 +227,13 @@ var StreamService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ReadRange",
 			Handler:    _StreamService_ReadRange_Handler,
 		},
+	},
+	Streams: []grpc.StreamDesc{
 		{
-			MethodName: "ReadOffset",
-			Handler:    _StreamService_ReadOffset_Handler,
+			StreamName:    "ReadOffset",
+			Handler:       _StreamService_ReadOffset_Handler,
+			ServerStreams: true,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
 	Metadata: "stratus/v1/stratus.proto",
 }
