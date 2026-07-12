@@ -12,6 +12,13 @@ import (
 )
 
 type (
+	Info struct {
+		FirstID       uint64
+		LastID        uint64
+		CachedRecords uint64
+		FSRecords     uint64
+	}
+
 	Stream struct {
 		subscriberBuffer int
 		storage          *storage.Storage
@@ -192,10 +199,16 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 	return result, nil
 }
 
-// Range returns the inclusive ID window currently retained by the stream.
-// first is 0 when the stream is empty.
-func (s *Stream) Range() (first, last uint64) {
-	return s.storage.Range()
+func (s *Stream) Info() Info {
+	firstID, lastID := s.storage.Range()
+	cacheEntriesCount := s.lru.Len()
+
+	return Info{
+		FirstID:       firstID,
+		LastID:        lastID,
+		FSRecords:     lastID - firstID + 1,
+		CachedRecords: uint64(cacheEntriesCount),
+	}
 }
 
 func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error) {
@@ -247,6 +260,16 @@ func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
 	s.notify()
 
 	return result, nil
+}
+
+func (s *Stream) ReCache(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		firstID, lastID := s.storage.Range()
+		return s.fetchAndCacheRecords(ctx, firstID, lastID)
+	}
 }
 
 func (s *Stream) lazyLoadRecord(ctx context.Context, id uint64) (*storage.Record, error) {

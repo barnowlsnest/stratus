@@ -11,6 +11,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -19,10 +20,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	StreamService_Delete_FullMethodName     = "/stratus.v1.StreamService/Delete"
-	StreamService_Add_FullMethodName        = "/stratus.v1.StreamService/Add"
-	StreamService_ReadRange_FullMethodName  = "/stratus.v1.StreamService/ReadRange"
-	StreamService_ReadOffset_FullMethodName = "/stratus.v1.StreamService/ReadOffset"
+	StreamService_Delete_FullMethodName        = "/stratus.v1.StreamService/Delete"
+	StreamService_Add_FullMethodName           = "/stratus.v1.StreamService/Add"
+	StreamService_ReadRange_FullMethodName     = "/stratus.v1.StreamService/ReadRange"
+	StreamService_ReCache_FullMethodName       = "/stratus.v1.StreamService/ReCache"
+	StreamService_GetStreamInfo_FullMethodName = "/stratus.v1.StreamService/GetStreamInfo"
+	StreamService_ReadOffset_FullMethodName    = "/stratus.v1.StreamService/ReadOffset"
 )
 
 // StreamServiceClient is the client API for StreamService service.
@@ -32,6 +35,8 @@ type StreamServiceClient interface {
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*AddResponse, error)
 	ReadRange(ctx context.Context, in *ReadRangeRequest, opts ...grpc.CallOption) (*ReadResponse, error)
+	ReCache(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ReCacheResponse, error)
+	GetStreamInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetStreamInfoResponse, error)
 	ReadOffset(ctx context.Context, in *ReadOffsetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadResponse], error)
 }
 
@@ -73,6 +78,26 @@ func (c *streamServiceClient) ReadRange(ctx context.Context, in *ReadRangeReques
 	return out, nil
 }
 
+func (c *streamServiceClient) ReCache(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ReCacheResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReCacheResponse)
+	err := c.cc.Invoke(ctx, StreamService_ReCache_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *streamServiceClient) GetStreamInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GetStreamInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetStreamInfoResponse)
+	err := c.cc.Invoke(ctx, StreamService_GetStreamInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *streamServiceClient) ReadOffset(ctx context.Context, in *ReadOffsetRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &StreamService_ServiceDesc.Streams[0], StreamService_ReadOffset_FullMethodName, cOpts...)
@@ -99,6 +124,8 @@ type StreamServiceServer interface {
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	Add(context.Context, *AddRequest) (*AddResponse, error)
 	ReadRange(context.Context, *ReadRangeRequest) (*ReadResponse, error)
+	ReCache(context.Context, *emptypb.Empty) (*ReCacheResponse, error)
+	GetStreamInfo(context.Context, *emptypb.Empty) (*GetStreamInfoResponse, error)
 	ReadOffset(*ReadOffsetRequest, grpc.ServerStreamingServer[ReadResponse]) error
 	mustEmbedUnimplementedStreamServiceServer()
 }
@@ -118,6 +145,12 @@ func (UnimplementedStreamServiceServer) Add(context.Context, *AddRequest) (*AddR
 }
 func (UnimplementedStreamServiceServer) ReadRange(context.Context, *ReadRangeRequest) (*ReadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReadRange not implemented")
+}
+func (UnimplementedStreamServiceServer) ReCache(context.Context, *emptypb.Empty) (*ReCacheResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReCache not implemented")
+}
+func (UnimplementedStreamServiceServer) GetStreamInfo(context.Context, *emptypb.Empty) (*GetStreamInfoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetStreamInfo not implemented")
 }
 func (UnimplementedStreamServiceServer) ReadOffset(*ReadOffsetRequest, grpc.ServerStreamingServer[ReadResponse]) error {
 	return status.Error(codes.Unimplemented, "method ReadOffset not implemented")
@@ -197,6 +230,42 @@ func _StreamService_ReadRange_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StreamService_ReCache_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamServiceServer).ReCache(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamService_ReCache_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamServiceServer).ReCache(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _StreamService_GetStreamInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamServiceServer).GetStreamInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamService_GetStreamInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamServiceServer).GetStreamInfo(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _StreamService_ReadOffset_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(ReadOffsetRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -226,6 +295,14 @@ var StreamService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReadRange",
 			Handler:    _StreamService_ReadRange_Handler,
+		},
+		{
+			MethodName: "ReCache",
+			Handler:    _StreamService_ReCache_Handler,
+		},
+		{
+			MethodName: "GetStreamInfo",
+			Handler:    _StreamService_GetStreamInfo_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -40,6 +40,16 @@ type AddResult struct {
 	DuplicateRecords uint64
 }
 
+// StreamInfo describes the current state of the stream.
+type StreamInfo struct {
+	// Range is the range of IDs currently held by the stream.
+	Range Range
+	// CachedRecords is the number of records held in the in-memory cache.
+	CachedRecords uint64
+	// FSRecords is the number of records persisted on the filesystem.
+	FSRecords uint64
+}
+
 // DeleteResult reports the outcome of a Delete call.
 type DeleteResult struct {
 	// DeletedRecords is the range of IDs removed from the stream.
@@ -70,6 +80,14 @@ func fromProtoOutputRecords(in []*pb.OutputRecord) []OutputRecord {
 	}
 
 	return out
+}
+
+func fromProtoStreamInfo(i *pb.StreamInfo) StreamInfo {
+	return StreamInfo{
+		Range:         fromProtoRange(i.GetRange()),
+		CachedRecords: i.GetCachedRecords(),
+		FSRecords:     i.GetFsRecords(),
+	}
 }
 
 func fromProtoRange(r *pb.Range) Range {

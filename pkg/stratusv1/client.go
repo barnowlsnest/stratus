@@ -10,6 +10,7 @@ import (
 	pb "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Client is a Stratus StreamService client.
@@ -119,6 +120,27 @@ func (c *Client) ReadOffset(ctx context.Context, startID, maxRecords uint64, tim
 
 	// return fromProtoOutputRecords(resp.GetRecords()), nil
 	return out, nil
+}
+
+// ReCache rebuilds the in-memory cache from the persisted stream and reports
+// the range of IDs it now holds.
+func (c *Client) ReCache(ctx context.Context) (Range, error) {
+	resp, err := c.svc.ReCache(ctx, &emptypb.Empty{})
+	if err != nil {
+		return Range{}, err
+	}
+
+	return fromProtoRange(resp.GetRange()), nil
+}
+
+// GetStreamInfo returns the current state of the stream.
+func (c *Client) GetStreamInfo(ctx context.Context) (StreamInfo, error) {
+	resp, err := c.svc.GetStreamInfo(ctx, &emptypb.Empty{})
+	if err != nil {
+		return StreamInfo{}, err
+	}
+
+	return fromProtoStreamInfo(resp.GetInfo()), nil
 }
 
 // Delete removes records with IDs up to and including endID, reporting the
