@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
-	
+
 	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"github.com/barnowlsnest/stratus/internal/storage"
 	"github.com/barnowlsnest/stratus/internal/stream"
@@ -27,7 +27,7 @@ type (
 		Range() (first, last uint64)
 		DataReady() <-chan struct{}
 	}
-	
+
 	Server struct {
 		stratusv1.UnsafeStreamServiceServer
 		stream Stream
@@ -44,12 +44,12 @@ func (s *Server) Add(ctx context.Context, req *stratusv1.AddRequest) (*stratusv1
 	if len(req.GetRecords()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "no records to add")
 	}
-	
+
 	res, err := s.stream.Add(ctx, toStorageRecords(req.GetRecords()))
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	
+
 	return &stratusv1.AddResponse{
 		AddedRecords:     toProtoRange(res.AddedRange),
 		StreamRecords:    toProtoRange(res.StreamRange),
@@ -60,12 +60,12 @@ func (s *Server) Add(ctx context.Context, req *stratusv1.AddRequest) (*stratusv1
 func (s *Server) ReadRange(ctx context.Context, req *stratusv1.ReadRangeRequest) (*stratusv1.ReadResponse, error) {
 	ctx, cancel := withTimeout(ctx, req.GetTimeout())
 	defer cancel()
-	
+
 	records, err := s.stream.Get(ctx, req.GetStartId(), req.GetEndId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	
+
 	return &stratusv1.ReadResponse{Records: toOutputRecords(records)}, nil
 }
 
@@ -73,21 +73,21 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 	if req.GetMaxRecords() == 0 {
 		return status.Error(codes.InvalidArgument, "max_records must be greater than zero")
 	}
-	
+
 	requested := req.GetTimeout().AsDuration()
 	if requested > readOffsetMaxTimeout {
 		return status.Error(codes.InvalidArgument, "timeout must not exceed "+readOffsetMaxTimeout.String())
 	}
-	
+
 	ctx, cancel := context.WithTimeout(str.Context(), max(readOffsetMinTimeout, requested))
 	defer cancel()
-	
+
 	startID := req.GetStartId()
 	endID := startID + req.GetMaxRecords() - 1
 	if endID < startID {
 		endID = ^uint64(0)
 	}
-	
+
 	nextID := startID
 	for nextID <= endID {
 		ready := s.stream.DataReady()
@@ -102,7 +102,7 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 		case err != nil:
 			return toStatus(err)
 		}
-		
+
 		if len(recs) > 0 {
 			if err := str.Send(&stratusv1.ReadResponse{Records: toOutputRecords(recs)}); err != nil {
 				return err
@@ -110,14 +110,14 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 			nextID += uint64(len(recs))
 			continue
 		}
-		
+
 		select {
 		case <-ready:
 		case <-ctx.Done():
 			return nil
 		}
 	}
-	
+
 	return nil
 }
 
@@ -126,7 +126,7 @@ func (s *Server) Delete(ctx context.Context, req *stratusv1.DeleteRequest) (*str
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	
+
 	return &stratusv1.DeleteResponse{
 		DeletedRecords: toProtoRange(res.DeletedRange),
 		StreamRecords:  toProtoRange(res.StreamRange),
@@ -141,7 +141,7 @@ func toStorageRecords(in []*stratusv1.InputRecord) []*storage.Record {
 			Bytes:    r.GetRawData(),
 		})
 	}
-	
+
 	return records
 }
 
@@ -153,7 +153,7 @@ func toOutputRecords(in []*storage.Record) []*stratusv1.OutputRecord {
 			RawData: r.Bytes,
 		})
 	}
-	
+
 	return out
 }
 
@@ -168,7 +168,7 @@ func withTimeout(ctx context.Context, d *durationpb.Duration) (context.Context, 
 	if d == nil || d.AsDuration() <= 0 {
 		return context.WithCancel(ctx)
 	}
-	
+
 	return context.WithTimeout(ctx, d.AsDuration())
 }
 

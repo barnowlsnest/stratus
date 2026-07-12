@@ -130,6 +130,7 @@ func (s *Stream) Start(ctx context.Context) error {
 		s.lru.Put(r.ID, r)
 		s.notify()
 	}
+
 	s.started.Swap(false)
 	s.notify()
 
