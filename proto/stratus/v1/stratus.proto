@@ -2,6 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
 
 package stratus.v1;
 
@@ -11,7 +12,23 @@ service StreamService {
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc Add(AddRequest) returns (AddResponse);
   rpc ReadRange(ReadRangeRequest) returns (ReadResponse);
+  rpc ReCache(google.protobuf.Empty) returns (ReCacheResponse);
+  rpc GetStreamInfo(google.protobuf.Empty) returns (GetStreamInfoResponse);
   rpc ReadOffset(ReadOffsetRequest) returns (stream ReadResponse);
+}
+
+message GetStreamInfoResponse {
+  StreamInfo info = 1;
+}
+
+message StreamInfo {
+  Range range=1;
+  uint64 cached_records=2;
+  uint64 fs_records=3;
+}
+
+message ReCacheResponse {
+  Range range=1;
 }
 
 message InputRecord {

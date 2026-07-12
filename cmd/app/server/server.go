@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var (
@@ -24,8 +25,9 @@ type (
 		Add(ctx context.Context, records []*storage.Record) (stream.AddResult, error)
 		Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error)
 		Del(ctx context.Context, upTo uint64) (stream.DelResult, error)
-		Range() (first, last uint64)
+		Info() stream.Info
 		DataReady() <-chan struct{}
+		ReCache(ctx context.Context) error
 	}
 
 	Server struct {
@@ -89,14 +91,23 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 	}
 
 	nextID := startID
-	for nextID <= endID {
+	for {
+		if nextID >= endID {
+			return nil
+		}
+
+		i := s.stream.Info()
+		if i.FirstID > 0 && nextID < i.FirstID {
+			return toStatus(storage.ErrOutOfBounds)
+		}
+
 		ready := s.stream.DataReady()
 		recs, err := s.stream.Get(ctx, nextID, endID)
 		switch {
 		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			return nil
 		case errors.Is(err, storage.ErrOutOfBounds):
-			if first, _ := s.stream.Range(); first > 0 && nextID < first {
+			if i.FirstID > 0 && nextID < i.FirstID {
 				return toStatus(err)
 			}
 		case err != nil:
@@ -117,8 +128,6 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 			return nil
 		}
 	}
-
-	return nil
 }
 
 func (s *Server) Delete(ctx context.Context, req *stratusv1.DeleteRequest) (*stratusv1.DeleteResponse, error) {
@@ -130,6 +139,40 @@ func (s *Server) Delete(ctx context.Context, req *stratusv1.DeleteRequest) (*str
 	return &stratusv1.DeleteResponse{
 		DeletedRecords: toProtoRange(res.DeletedRange),
 		StreamRecords:  toProtoRange(res.StreamRange),
+	}, nil
+}
+
+func (s *Server) ReCache(ctx context.Context, _ *emptypb.Empty) (*stratusv1.ReCacheResponse, error) {
+	if err := s.stream.ReCache(ctx); err != nil {
+		return nil, toStatus(err)
+	}
+
+	i := s.stream.Info()
+	streamRange := &stratusv1.Range{
+		Start: i.FirstID,
+		End:   i.LastID,
+	}
+
+	return &stratusv1.ReCacheResponse{
+		Range: streamRange,
+	}, nil
+}
+
+func (s *Server) GetStreamInfo(context.Context, *emptypb.Empty) (*stratusv1.GetStreamInfoResponse, error) {
+	i := s.stream.Info()
+	streamRange := &stratusv1.Range{
+		Start: i.FirstID,
+		End:   i.LastID,
+	}
+
+	streamInfo := &stratusv1.StreamInfo{
+		Range:         streamRange,
+		CachedRecords: i.CachedRecords,
+		FsRecords:     i.FSRecords,
+	}
+
+	return &stratusv1.GetStreamInfoResponse{
+		Info: streamInfo,
 	}, nil
 }
 

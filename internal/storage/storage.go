@@ -209,6 +209,13 @@ func (s *Storage) Del(ctx context.Context, upToID uint64) error {
 		return ErrOutOfBounds
 	}
 
+	if err := s.wal.TruncateContext(ctx, upToID); err != nil {
+		return err
+	}
+	if s.wal.FirstLSN() == upToID {
+		return nil
+	}
+
 	return s.wal.CutOffsetContext(ctx, upToID)
 }
 
