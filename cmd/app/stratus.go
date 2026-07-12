@@ -121,7 +121,7 @@ func newLogger(cfg *config.Config) (*logger.Logger, error) {
 func newWAL(appCfg *config.Config, appLogger *logger.Logger) (*wal.WAL, error) {
 	w, re, err := wal.Open(appCfg.WALDir,
 		wal.WithBatchSize(8),
-		// wal.WithMaxSegmentSize(64),
+		wal.WithMaxSegmentSize(64),
 		wal.WithMaxRecordSize(64),
 		wal.WithLogger(appLogger),
 	)
