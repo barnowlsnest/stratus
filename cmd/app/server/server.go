@@ -17,7 +17,7 @@ import (
 
 var (
 	readOffsetMinTimeout = 61 * time.Millisecond
-	readOffsetMaxTimeout = 5 * time.Hour
+	readOffsetMaxTimeout = 24 * time.Hour
 )
 
 type (
