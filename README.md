@@ -1,1 +1,144 @@
 # Barn Owls Nest / Stratus
+
+Stratus is an append-only record stream served over gRPC and persisted in a write-ahead log.
+Records are appended with a client-supplied dedup key, assigned a monotonic ID (the WAL LSN),
+and read back by ID — either as a bounded range or as a live tail that blocks until new records
+arrive. A LRU cache in front of the WAL serves recent reads without touching the filesystem.
+
+## Concepts
+
+- **Record ID** — the LSN the WAL assigns on append. IDs are monotonic and start at 1; `0` is
+  never a valid record ID and is used as a "not set" sentinel in requests.
+- **Dedup key** — a non-zero, client-generated `uint64`. A key seen again within the dedup window
+  (`dedup_window`, default `1m`) causes the record to be dropped and counted as a duplicate.
+- **Stream range** — the inclusive `[start, end]` window of IDs currently in the WAL. `Delete`
+  moves `start` forward; `Add` moves `end` forward.
+
+## API
+
+The service is `stratus.v1.StreamService`, defined in [`proto/stratus/v1/stratus.proto`](proto/stratus/v1/stratus.proto).
+
+| RPC | Kind | Purpose |
+| --- | --- | --- |
+| `Add` | unary | Append a batch of records. |
+| `ReadRange` | unary | Read the inclusive ID range `[start_id, end_id]`. |
+| `ReadOffset` | server stream | Read up to `max_records` from `start_id`, tailing for new ones. |
+| `Delete` | unary | Drop records up to and including `end_id`. |
+| `ReCache` | unary | Rebuild the in-memory cache from the WAL. |
+| `GetStreamInfo` | unary | Report the current range and record counts. |
+
+### Add
+
+Takes `repeated InputRecord records`, each with a non-zero `dedup_key` and non-empty `raw_data`.
+Returns `added_records` (the IDs assigned to records that were written), `stream_records` (the
+stream's range after the write), and `duplicate_records` (how many were dropped by the dedup
+window).
+
+An empty batch is `INVALID_ARGUMENT`. A batch where *every* record is a duplicate is
+`ALREADY_EXISTS` — no partial result is returned. A batch that is partially duplicate succeeds,
+and `added_records` covers only the records that made it in.
+
+### ReadRange
+
+Reads `[start_id, end_id]` inclusive. Either bound may be `0`, meaning "the stream's current
+first / last ID", so `{}` reads the whole stream (subject to the read cap below).
+
+The range is clamped to the stream's window: a range that overlaps the window is trimmed to it,
+while a range entirely outside it is `OUT_OF_RANGE`. Asking for more than **64 records** is
+`INVALID_ARGUMENT` — this cap is currently hardcoded (see [Configuration](#configuration)).
+
+`timeout` bounds the read on the server side; when unset or non-positive, the read is bounded
+only by the caller's context.
+
+### ReadOffset
+
+Streams `ReadResponse` messages starting at `start_id` until `max_records` have been sent or the
+timeout expires. Unlike `ReadRange`, it does not end at the current tail: when it catches up it
+blocks until `Add` produces more records, then keeps sending. Records already deleted from under
+the reader (`start_id` below the stream's first ID) end the stream with `OUT_OF_RANGE`.
+
+`max_records` must be non-zero (`INVALID_ARGUMENT` otherwise). `timeout` is clamped to a floor of
+61ms and must not exceed 24h. Timeout expiry is a normal end of stream, not an error.
+
+### Delete
+
+Removes records up to and including `end_id` and evicts them from the cache. Returns
+`deleted_records` and the remaining `stream_records`. An `end_id` of `0`, or one outside the
+current stream range, is `OUT_OF_RANGE`.
+
+Deletion is backed by the WAL's truncate plus a cut at the offset, so it reclaims whole segments;
+IDs at the deleted boundary may briefly remain readable.
+
+### ReCache
+
+Reloads the cache from the WAL over the stream's current range and returns that range. Useful
+after a `Delete` or when the cache has been churned by cold reads.
+
+### GetStreamInfo
+
+Returns the stream `range`, `cached_records` (entries currently in the LRU) and `fs_records`
+(records in the WAL).
+
+### Status codes
+
+| Code | Cause |
+| --- | --- |
+| `INVALID_ARGUMENT` | empty batch, empty record or dedup key, `max_records` of 0, range longer than the read cap, timeout over 24h |
+| `OUT_OF_RANGE` | requested range lies outside the stream window |
+| `ALREADY_EXISTS` | every record in the batch was a duplicate |
+| `DEADLINE_EXCEEDED` / `CANCELED` | context expired or cancelled |
+| `INTERNAL` | anything else (WAL failures) |
+
+## Go client
+
+`pkg/stratusv1` wraps the generated stubs with its own DTOs, so callers do not depend on the
+protobuf package.
+
+```go
+c, err := stratusv1.Dial("127.0.0.1:8000", stratusv1.WithInsecure())
+if err != nil {
+    return err
+}
+defer c.Close()
+
+added, err := c.Add(ctx, []stratusv1.InputRecord{
+    {DedupKey: 1, RawData: []byte("hello")},
+})
+
+// Bounded read.
+records, err := c.ReadRange(ctx, added.AddedRecords.Start, added.AddedRecords.End, 0)
+
+// Live tail: ReadOffset returns a channel closed when the stream ends.
+ch, err := c.ReadOffset(ctx, 1, 100, 30*time.Second)
+for r := range ch {
+    fmt.Println(r.ID, string(r.RawData))
+}
+```
+
+`Dial` gives the client ownership of the connection (`Close` shuts it down); `New` wraps a
+connection you keep owning (`Close` is then a no-op).
+
+## Configuration
+
+Settings come from flags or environment variables of the same name (uppercased).
+
+| Name | Default | Meaning |
+| --- | --- | --- |
+| `host` | `127.0.0.1` | listen host |
+| `port` | `8000` | listen port |
+| `wal_dir` | — | WAL segment directory (required) |
+| `log_level` | `info` | log level |
+| `dedup_window` | `1m` | how long a dedup key is remembered |
+| `cache_size` | `4096` | LRU capacity in records |
+| `max_batch_read_size` | `1024` | **not wired up**: the read cap is the storage default of 64 |
+
+## Running
+
+```sh
+task go-build     # runs sanity (fmt, vet, lint, test), then builds ./dist/stratus
+task sanity       # fmt, vet, lint, test
+task buf-gen      # regenerate gRPC code from proto
+task docker-run   # build the image and start it via compose
+```
+
+The compose service listens on `8000` and keeps its WAL in a `stratus_wal` volume.
