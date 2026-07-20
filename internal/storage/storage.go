@@ -165,38 +165,55 @@ func (s *Storage) Read(ctx context.Context, fromID, toID uint64) ([]*Record, err
 		return nil, err
 	}
 
-	reader, err := s.wal.NewReader(fromID)
+	batch := make([]*Record, 0, toID-fromID+1)
+	err := s.ReadEach(ctx, fromID, toID, func(r *Record) error {
+		batch = append(batch, r)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
+
+	return batch, nil
+}
+
+// ReadEach streams every record in the inclusive range [fromID, toID] to fn in
+// ID order. Unlike Read it is not bounded by the max read batch size, so it can
+// walk arbitrarily large ranges without ErrTooLongRangeToRead — used to warm the
+// cache over the whole stream on startup and ReCache.
+func (s *Storage) ReadEach(ctx context.Context, fromID, toID uint64, fn func(*Record) error) error {
+	if err := s.checkRange(fromID, toID); err != nil {
+		return err
+	}
+
+	reader, err := s.wal.NewReader(fromID)
+	if err != nil {
+		return err
+	}
 	defer func() { _ = reader.Close() }()
 
-	batch := make([]*Record, 0, toID-fromID+1)
 	for reader.Next() {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		default:
 		}
 
 		entry, err := reader.Entry(), reader.Err()
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if entry.LSN > toID {
 			break
 		}
 
-		chunk := &Record{
-			ID:    entry.LSN,
-			Bytes: bytes.Clone(entry.Payload),
+		if err := fn(&Record{ID: entry.LSN, Bytes: bytes.Clone(entry.Payload)}); err != nil {
+			return err
 		}
-
-		batch = append(batch, chunk)
 	}
 
-	return batch, nil
+	return nil
 }
 
 func (s *Storage) Del(ctx context.Context, upToID uint64) error {
@@ -288,13 +305,23 @@ func (s *Storage) applyDefaults() {
 }
 
 func (s *Storage) validateRange(fromID, toID uint64) error {
+	if err := s.checkRange(fromID, toID); err != nil {
+		return err
+	}
+
+	if int(toID-fromID+1) > s.maxReadBatchSize {
+		return ErrTooLongRangeToRead
+	}
+
+	return nil
+}
+
+func (s *Storage) checkRange(fromID, toID uint64) error {
 	switch {
 	case fromID == 0, toID == 0:
 		return ErrOutOfBounds
 	case fromID > toID:
 		return ErrOutOfBounds
-	case int(toID-fromID+1) > s.maxReadBatchSize:
-		return ErrTooLongRangeToRead
 	case s.wal.LastLSN() < fromID:
 		return ErrOutOfBounds
 	case s.wal.FirstLSN() > toID:
