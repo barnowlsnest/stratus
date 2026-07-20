@@ -299,16 +299,10 @@ func (s *Stream) readAndCacheRecord(ctx context.Context, id uint64) (*storage.Re
 }
 
 func (s *Stream) fetchAndCacheRecords(ctx context.Context, fromID, toID uint64) error {
-	records, err := s.storage.Read(ctx, fromID, toID)
-	if err != nil {
-		return err
-	}
-
-	for _, r := range records {
+	return s.storage.ReadEach(ctx, fromID, toID, func(r *storage.Record) error {
 		s.lru.Put(r.ID, r)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func (s *Stream) validate() error {

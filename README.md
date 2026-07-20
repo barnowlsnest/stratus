@@ -1,4 +1,4 @@
-# Barn Owls Nest / Stratus
+  # Barn Owls Nest / Stratus
 
 Stratus is an append-only record stream served over gRPC and persisted in a write-ahead log.
 Records are appended with a client-supplied dedup key, assigned a monotonic ID (the WAL LSN),
@@ -13,19 +13,19 @@ arrive. A LRU cache in front of the WAL serves recent reads without touching the
   (`dedup_window`, default `1m`) causes the record to be dropped and counted as a duplicate.
 - **Stream range** — the inclusive `[start, end]` window of IDs currently in the WAL. `Delete`
   moves `start` forward; `Add` moves `end` forward.
-
+ 
 ## API
 
 The service is `stratus.v1.StreamService`, defined in [`proto/stratus/v1/stratus.proto`](proto/stratus/v1/stratus.proto).
 
-| RPC | Kind | Purpose |
-| --- | --- | --- |
-| `Add` | unary | Append a batch of records. |
-| `ReadRange` | unary | Read the inclusive ID range `[start_id, end_id]`. |
-| `ReadOffset` | server stream | Read up to `max_records` from `start_id`, tailing for new ones. |
-| `Delete` | unary | Drop records up to and including `end_id`. |
-| `ReCache` | unary | Rebuild the in-memory cache from the WAL. |
-| `GetStreamInfo` | unary | Report the current range and record counts. |
+| RPC             | Kind          | Purpose                                                         |
+|-----------------|---------------|-----------------------------------------------------------------|
+| `Add`           | unary         | Append a batch of records.                                      |
+| `ReadRange`     | unary         | Read the inclusive ID range `[start_id, end_id]`.               |
+| `ReadOffset`    | server stream | Read up to `max_records` from `start_id`, tailing for new ones. |
+| `Delete`        | unary         | Drop records up to and including `end_id`.                      |
+| `ReCache`       | unary         | Rebuild the in-memory cache from the WAL.                       |
+| `GetStreamInfo` | unary         | Report the current range and record counts.                     |
 
 ### Add
 
@@ -41,11 +41,12 @@ and `added_records` covers only the records that made it in.
 ### ReadRange
 
 Reads `[start_id, end_id]` inclusive. Either bound may be `0`, meaning "the stream's current
-first / last ID", so `{}` reads the whole stream (subject to the read cap below).
+first / last ID", so `{}` reads the whole stream.
 
 The range is clamped to the stream's window: a range that overlaps the window is trimmed to it,
-while a range entirely outside it is `OUT_OF_RANGE`. Asking for more than **64 records** is
-`INVALID_ARGUMENT` — this cap is currently hardcoded (see [Configuration](#configuration)).
+while a range entirely outside it is `OUT_OF_RANGE`. Records are served from the LRU cache,
+falling back to a single-record WAL read (and caching the result) on a miss, so there is no
+fixed per-request record cap.
 
 `timeout` bounds the read on the server side; when unset or non-positive, the read is bounded
 only by the caller's context.
@@ -72,7 +73,9 @@ IDs at the deleted boundary may briefly remain readable.
 ### ReCache
 
 Reloads the cache from the WAL over the stream's current range and returns that range. Useful
-after a `Delete` or when the cache has been churned by cold reads.
+after a `Delete` or when the cache has been churned by cold reads. The reload streams the whole
+range record by record, so it is not bounded by the read cap; the LRU keeps the newest
+`cache_size` entries. The startup preload works the same way.
 
 ### GetStreamInfo
 
@@ -81,13 +84,13 @@ Returns the stream `range`, `cached_records` (entries currently in the LRU) and 
 
 ### Status codes
 
-| Code | Cause |
-| --- | --- |
-| `INVALID_ARGUMENT` | empty batch, empty record or dedup key, `max_records` of 0, range longer than the read cap, timeout over 24h |
-| `OUT_OF_RANGE` | requested range lies outside the stream window |
-| `ALREADY_EXISTS` | every record in the batch was a duplicate |
-| `DEADLINE_EXCEEDED` / `CANCELED` | context expired or cancelled |
-| `INTERNAL` | anything else (WAL failures) |
+| Code                             | Cause                                                                        |
+|----------------------------------|------------------------------------------------------------------------------|
+| `INVALID_ARGUMENT`               | empty batch, empty record or dedup key, `max_records` of 0, timeout over 24h |
+| `OUT_OF_RANGE`                   | requested range lies outside the stream window                               |
+| `ALREADY_EXISTS`                 | every record in the batch was a duplicate                                    |
+| `DEADLINE_EXCEEDED` / `CANCELED` | context expired or cancelled                                                 |
+| `INTERNAL`                       | anything else (WAL failures)                                                 |
 
 ## Go client
 
@@ -122,15 +125,15 @@ connection you keep owning (`Close` is then a no-op).
 
 Settings come from flags or environment variables of the same name (uppercased).
 
-| Name | Default | Meaning |
-| --- | --- | --- |
-| `host` | `127.0.0.1` | listen host |
-| `port` | `8000` | listen port |
-| `wal_dir` | — | WAL segment directory (required) |
-| `log_level` | `info` | log level |
-| `dedup_window` | `1m` | how long a dedup key is remembered |
-| `cache_size` | `4096` | LRU capacity in records |
-| `max_batch_read_size` | `1024` | **not wired up**: the read cap is the storage default of 64 |
+| Name                  | Default     | Meaning                                                                                                                    |
+|-----------------------|-------------|----------------------------------------------------------------------------------------------------------------------------|
+| `host`                | `127.0.0.1` | listen host                                                                                                                |
+| `port`                | `8000`      | listen port                                                                                                                |
+| `wal_dir`             | —           | WAL segment directory (required)                                                                                           |
+| `log_level`           | `info`      | log level                                                                                                                  |
+| `dedup_window`        | `1m`        | how long a dedup key is remembered                                                                                         |
+| `cache_size`          | `4096`      | LRU capacity in records                                                                                                    |
+| `max_batch_read_size` | `1024`      | **not wired up**: the storage read cap stays at its default of 64; it bounds single `Read` batches only, not cache warming |
 
 ## Running
 
