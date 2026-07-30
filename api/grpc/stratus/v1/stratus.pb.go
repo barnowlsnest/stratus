@@ -128,27 +128,27 @@ func (x *StreamInfo) GetFsRecords() uint64 {
 	return 0
 }
 
-type ReCacheResponse struct {
+type ReconcileCacheResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Range         *Range                 `protobuf:"bytes,1,opt,name=range,proto3" json:"range,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ReCacheResponse) Reset() {
-	*x = ReCacheResponse{}
+func (x *ReconcileCacheResponse) Reset() {
+	*x = ReconcileCacheResponse{}
 	mi := &file_stratus_v1_stratus_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ReCacheResponse) String() string {
+func (x *ReconcileCacheResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ReCacheResponse) ProtoMessage() {}
+func (*ReconcileCacheResponse) ProtoMessage() {}
 
-func (x *ReCacheResponse) ProtoReflect() protoreflect.Message {
+func (x *ReconcileCacheResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_stratus_v1_stratus_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -160,12 +160,12 @@ func (x *ReCacheResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReCacheResponse.ProtoReflect.Descriptor instead.
-func (*ReCacheResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ReconcileCacheResponse.ProtoReflect.Descriptor instead.
+func (*ReconcileCacheResponse) Descriptor() ([]byte, []int) {
 	return file_stratus_v1_stratus_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ReCacheResponse) GetRange() *Range {
+func (x *ReconcileCacheResponse) GetRange() *Range {
 	if x != nil {
 		return x.Range
 	}
@@ -705,8 +705,8 @@ const file_stratus_v1_stratus_proto_rawDesc = "" +
 	"\x05range\x18\x01 \x01(\v2\x11.stratus.v1.RangeR\x05range\x12%\n" +
 	"\x0ecached_records\x18\x02 \x01(\x04R\rcachedRecords\x12\x1d\n" +
 	"\n" +
-	"fs_records\x18\x03 \x01(\x04R\tfsRecords\":\n" +
-	"\x0fReCacheResponse\x12'\n" +
+	"fs_records\x18\x03 \x01(\x04R\tfsRecords\"A\n" +
+	"\x16ReconcileCacheResponse\x12'\n" +
 	"\x05range\x18\x01 \x01(\v2\x11.stratus.v1.RangeR\x05range\"K\n" +
 	"\vInputRecord\x12\x1b\n" +
 	"\tdedup_key\x18\x01 \x01(\x04R\bdedupKey\x12\x19\n" +
@@ -739,12 +739,12 @@ const file_stratus_v1_stratus_proto_rawDesc = "" +
 	"\x06end_id\x18\x01 \x01(\x04R\x05endId\"\x86\x01\n" +
 	"\x0eDeleteResponse\x12:\n" +
 	"\x0fdeleted_records\x18\x01 \x01(\v2\x11.stratus.v1.RangeR\x0edeletedRecords\x128\n" +
-	"\x0estream_records\x18\x02 \x01(\v2\x11.stratus.v1.RangeR\rstreamRecords2\xa2\x03\n" +
+	"\x0estream_records\x18\x02 \x01(\v2\x11.stratus.v1.RangeR\rstreamRecords2\xb0\x03\n" +
 	"\rStreamService\x12?\n" +
 	"\x06Delete\x12\x19.stratus.v1.DeleteRequest\x1a\x1a.stratus.v1.DeleteResponse\x126\n" +
 	"\x03Add\x12\x16.stratus.v1.AddRequest\x1a\x17.stratus.v1.AddResponse\x12C\n" +
-	"\tReadRange\x12\x1c.stratus.v1.ReadRangeRequest\x1a\x18.stratus.v1.ReadResponse\x12>\n" +
-	"\aReCache\x12\x16.google.protobuf.Empty\x1a\x1b.stratus.v1.ReCacheResponse\x12J\n" +
+	"\tReadRange\x12\x1c.stratus.v1.ReadRangeRequest\x1a\x18.stratus.v1.ReadResponse\x12L\n" +
+	"\x0eReconcileCache\x12\x16.google.protobuf.Empty\x1a\".stratus.v1.ReconcileCacheResponse\x12J\n" +
 	"\rGetStreamInfo\x12\x16.google.protobuf.Empty\x1a!.stratus.v1.GetStreamInfoResponse\x12G\n" +
 	"\n" +
 	"ReadOffset\x12\x1d.stratus.v1.ReadOffsetRequest\x1a\x18.stratus.v1.ReadResponse0\x01B7Z5github.com/barnowlsnest/stratus/api/grpc/v1;stratusv1b\x06proto3"
@@ -763,26 +763,26 @@ func file_stratus_v1_stratus_proto_rawDescGZIP() []byte {
 
 var file_stratus_v1_stratus_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_stratus_v1_stratus_proto_goTypes = []any{
-	(*GetStreamInfoResponse)(nil), // 0: stratus.v1.GetStreamInfoResponse
-	(*StreamInfo)(nil),            // 1: stratus.v1.StreamInfo
-	(*ReCacheResponse)(nil),       // 2: stratus.v1.ReCacheResponse
-	(*InputRecord)(nil),           // 3: stratus.v1.InputRecord
-	(*Range)(nil),                 // 4: stratus.v1.Range
-	(*OutputRecord)(nil),          // 5: stratus.v1.OutputRecord
-	(*ReadOffsetRequest)(nil),     // 6: stratus.v1.ReadOffsetRequest
-	(*ReadRangeRequest)(nil),      // 7: stratus.v1.ReadRangeRequest
-	(*AddRequest)(nil),            // 8: stratus.v1.AddRequest
-	(*AddResponse)(nil),           // 9: stratus.v1.AddResponse
-	(*ReadResponse)(nil),          // 10: stratus.v1.ReadResponse
-	(*DeleteRequest)(nil),         // 11: stratus.v1.DeleteRequest
-	(*DeleteResponse)(nil),        // 12: stratus.v1.DeleteResponse
-	(*durationpb.Duration)(nil),   // 13: google.protobuf.Duration
-	(*emptypb.Empty)(nil),         // 14: google.protobuf.Empty
+	(*GetStreamInfoResponse)(nil),  // 0: stratus.v1.GetStreamInfoResponse
+	(*StreamInfo)(nil),             // 1: stratus.v1.StreamInfo
+	(*ReconcileCacheResponse)(nil), // 2: stratus.v1.ReconcileCacheResponse
+	(*InputRecord)(nil),            // 3: stratus.v1.InputRecord
+	(*Range)(nil),                  // 4: stratus.v1.Range
+	(*OutputRecord)(nil),           // 5: stratus.v1.OutputRecord
+	(*ReadOffsetRequest)(nil),      // 6: stratus.v1.ReadOffsetRequest
+	(*ReadRangeRequest)(nil),       // 7: stratus.v1.ReadRangeRequest
+	(*AddRequest)(nil),             // 8: stratus.v1.AddRequest
+	(*AddResponse)(nil),            // 9: stratus.v1.AddResponse
+	(*ReadResponse)(nil),           // 10: stratus.v1.ReadResponse
+	(*DeleteRequest)(nil),          // 11: stratus.v1.DeleteRequest
+	(*DeleteResponse)(nil),         // 12: stratus.v1.DeleteResponse
+	(*durationpb.Duration)(nil),    // 13: google.protobuf.Duration
+	(*emptypb.Empty)(nil),          // 14: google.protobuf.Empty
 }
 var file_stratus_v1_stratus_proto_depIdxs = []int32{
 	1,  // 0: stratus.v1.GetStreamInfoResponse.info:type_name -> stratus.v1.StreamInfo
 	4,  // 1: stratus.v1.StreamInfo.range:type_name -> stratus.v1.Range
-	4,  // 2: stratus.v1.ReCacheResponse.range:type_name -> stratus.v1.Range
+	4,  // 2: stratus.v1.ReconcileCacheResponse.range:type_name -> stratus.v1.Range
 	13, // 3: stratus.v1.ReadOffsetRequest.timeout:type_name -> google.protobuf.Duration
 	13, // 4: stratus.v1.ReadRangeRequest.timeout:type_name -> google.protobuf.Duration
 	3,  // 5: stratus.v1.AddRequest.records:type_name -> stratus.v1.InputRecord
@@ -794,13 +794,13 @@ var file_stratus_v1_stratus_proto_depIdxs = []int32{
 	11, // 11: stratus.v1.StreamService.Delete:input_type -> stratus.v1.DeleteRequest
 	8,  // 12: stratus.v1.StreamService.Add:input_type -> stratus.v1.AddRequest
 	7,  // 13: stratus.v1.StreamService.ReadRange:input_type -> stratus.v1.ReadRangeRequest
-	14, // 14: stratus.v1.StreamService.ReCache:input_type -> google.protobuf.Empty
+	14, // 14: stratus.v1.StreamService.ReconcileCache:input_type -> google.protobuf.Empty
 	14, // 15: stratus.v1.StreamService.GetStreamInfo:input_type -> google.protobuf.Empty
 	6,  // 16: stratus.v1.StreamService.ReadOffset:input_type -> stratus.v1.ReadOffsetRequest
 	12, // 17: stratus.v1.StreamService.Delete:output_type -> stratus.v1.DeleteResponse
 	9,  // 18: stratus.v1.StreamService.Add:output_type -> stratus.v1.AddResponse
 	10, // 19: stratus.v1.StreamService.ReadRange:output_type -> stratus.v1.ReadResponse
-	2,  // 20: stratus.v1.StreamService.ReCache:output_type -> stratus.v1.ReCacheResponse
+	2,  // 20: stratus.v1.StreamService.ReconcileCache:output_type -> stratus.v1.ReconcileCacheResponse
 	0,  // 21: stratus.v1.StreamService.GetStreamInfo:output_type -> stratus.v1.GetStreamInfoResponse
 	10, // 22: stratus.v1.StreamService.ReadOffset:output_type -> stratus.v1.ReadResponse
 	17, // [17:23] is the sub-list for method output_type

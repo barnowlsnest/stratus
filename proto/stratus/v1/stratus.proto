@@ -12,7 +12,7 @@ service StreamService {
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   rpc Add(AddRequest) returns (AddResponse);
   rpc ReadRange(ReadRangeRequest) returns (ReadResponse);
-  rpc ReCache(google.protobuf.Empty) returns (ReCacheResponse);
+  rpc ReconcileCache(google.protobuf.Empty) returns (ReconcileCacheResponse);
   rpc GetStreamInfo(google.protobuf.Empty) returns (GetStreamInfoResponse);
   rpc ReadOffset(ReadOffsetRequest) returns (stream ReadResponse);
 }
@@ -27,7 +27,7 @@ message StreamInfo {
   uint64 fs_records=3;
 }
 
-message ReCacheResponse {
+message ReconcileCacheResponse {
   Range range=1;
 }
 
