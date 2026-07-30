@@ -122,10 +122,10 @@ func (c *Client) ReadOffset(ctx context.Context, startID, maxRecords uint64, tim
 	return out, nil
 }
 
-// ReCache rebuilds the in-memory cache from the persisted stream and reports
-// the range of IDs it now holds.
-func (c *Client) ReCache(ctx context.Context) (Range, error) {
-	resp, err := c.svc.ReCache(ctx, &emptypb.Empty{})
+// ReconcileCache rebuilds the in-memory cache from the persisted stream and
+// reports the range of IDs it now holds.
+func (c *Client) ReconcileCache(ctx context.Context) (Range, error) {
+	resp, err := c.svc.ReconcileCache(ctx, &emptypb.Empty{})
 	if err != nil {
 		return Range{}, err
 	}

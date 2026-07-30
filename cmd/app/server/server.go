@@ -27,7 +27,7 @@ type (
 		Del(ctx context.Context, upTo uint64) (stream.DelResult, error)
 		Info() stream.Info
 		DataReady() <-chan struct{}
-		ReCache(ctx context.Context) error
+		ReconcileCache(ctx context.Context) error
 	}
 
 	Server struct {
@@ -142,8 +142,8 @@ func (s *Server) Delete(ctx context.Context, req *stratusv1.DeleteRequest) (*str
 	}, nil
 }
 
-func (s *Server) ReCache(ctx context.Context, _ *emptypb.Empty) (*stratusv1.ReCacheResponse, error) {
-	if err := s.stream.ReCache(ctx); err != nil {
+func (s *Server) ReconcileCache(ctx context.Context, _ *emptypb.Empty) (*stratusv1.ReconcileCacheResponse, error) {
+	if err := s.stream.ReconcileCache(ctx); err != nil {
 		return nil, toStatus(err)
 	}
 
@@ -153,7 +153,7 @@ func (s *Server) ReCache(ctx context.Context, _ *emptypb.Empty) (*stratusv1.ReCa
 		End:   i.LastID,
 	}
 
-	return &stratusv1.ReCacheResponse{
+	return &stratusv1.ReconcileCacheResponse{
 		Range: streamRange,
 	}, nil
 }
