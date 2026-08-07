@@ -1,6 +1,6 @@
 .claude/
 dist/
-Dockerfile
+app.Dockerfile
 Taskfile.yml
 LICENSE
 compose.yaml

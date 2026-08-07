@@ -59,7 +59,7 @@ tasks:
     deps:
       - sanity
     cmds:
-      - docker build -t {{.IMAGE}}:{{.TAG}} .
+      - docker build -f app.Dockerfile -t {{.IMAGE}}:{{.TAG}} .
 
   docker-push:
     deps:
