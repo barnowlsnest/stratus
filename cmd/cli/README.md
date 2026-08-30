@@ -18,7 +18,7 @@ goes through the same sanity gate as a local build.
 
 ```sh
 task docker-build-cli                                        # -> barnowlsnest/stratuscli:latest
-docker build -f cli.Dockerfile -t barnowlsnest/stratuscli .  # the same build by hand
+docker build -f cli.Dockerfile -t barnowlsnest/stratuscli .  # the same by hand
 ```
 
 Both modes work in the container. Command mode needs nothing special; the TUI needs a terminal,

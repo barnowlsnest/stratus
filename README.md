@@ -146,7 +146,7 @@ task go-build-app             # runs sanity (fmt, vet, lint, test), then builds 
 task go-build-cli             # same, for ./dist/cli/stratuscli
 task sanity                   # fmt, vet, lint, test
 task buf-gen                  # regenerate gRPC code from proto
-task docker-run               # build the server image and start it via compose
+task docker-run               # build the image and start it via compose
 task docker-build-cli         # build the CLI-only image from cli.Dockerfile
 task docker-run-cli -- info   # run the CLI in a container; args after `--` go to stratuscli
 task clear                    # remove ./dist
@@ -154,10 +154,21 @@ task clear                    # remove ./dist
 
 The image built by `app.Dockerfile` carries the server only; its builder stage installs `task` and
 `golangci-lint` (versions pinned as build args) and runs `task go-build-app`, so the image build
-goes through the same sanity gate as a local build. The compose service publishes `8000` and runs
-with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is mounted at `/app/config`, so the
-WAL directory itself is not on the volume. `cli.Dockerfile` builds a separate CLI-only image that
+goes through the same sanity gate as a local build. Compose is for local runs only: it starts the image `task docker-build` produces. The service
+publishes `8000` and runs with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is mounted at `/app/config`, so the WAL
+directory itself is not on the volume. `cli.Dockerfile` builds a separate CLI-only image that
 runs in both modes — see [`cmd/cli/README.md`](cmd/cli/README.md).
+
+## CI
+
+[`.github/workflows/docker.yml`](.github/workflows/docker.yml) runs `task sanity` (fmt, vet, lint,
+test) on every pull request and push. Only a merge to `main` goes further and builds both images,
+publishing them to GHCR as `ghcr.io/barnowlsnest/stratus` and `ghcr.io/barnowlsnest/stratuscli`,
+each tagged with the merge commit (`:<sha>`). It needs no secrets — the job's `packages: write`
+scope on `GITHUB_TOKEN` is enough.
+
+Packages are created private on first publish; make them public under the package's settings on
+GitHub, or `docker login ghcr.io` with a PAT that has `read:packages` before pulling.
 
 ## CLI
 
