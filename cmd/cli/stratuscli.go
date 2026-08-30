@@ -68,6 +68,13 @@ func run() error {
 
 	rootCmd.AddCommand(offsetCmd)
 
+	addFile, err := commands.NewAddFile(client)
+	if err != nil {
+		return fmt.Errorf("failed to create addfile command: %w", err)
+	}
+
+	rootCmd.AddCommand(addFile)
+
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		return fmt.Errorf("failed to execute command: %w", err)
 	}

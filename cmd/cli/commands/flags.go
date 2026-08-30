@@ -7,4 +7,5 @@ const (
 	flagStartID     = "start-id"
 	flagReadTimeout = "read-timeout"
 	flagMaxRecords  = "max-records"
+	flagInputFile   = "input-file"
 )
