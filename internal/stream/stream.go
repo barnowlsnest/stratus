@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
+
 	"github.com/barnowlsnest/stratus/internal/storage"
 )
 
@@ -68,15 +69,15 @@ func NewItem(dedupKey uint64, rawBytes []byte) *Item {
 	}
 }
 
-func WithStorage(storage *storage.Storage) Option {
+func WithStorage(store *storage.Storage) Option {
 	return func(s *Stream) {
-		s.storage = storage
+		s.storage = store
 	}
 }
 
-func WithCache(lru *lru.LRU[storage.Record]) Option {
+func WithCache(cache *lru.LRU[storage.Record]) Option {
 	return func(s *Stream) {
-		s.lru = lru
+		s.lru = cache
 	}
 }
 
@@ -201,7 +202,7 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 
 func (s *Stream) Info() Info {
 	firstID, lastID := s.storage.Range()
-	cacheEntriesCount := s.lru.Len()
+	cacheEntriesCount := max(s.lru.Len(), 0)
 
 	return Info{
 		FirstID:       firstID,

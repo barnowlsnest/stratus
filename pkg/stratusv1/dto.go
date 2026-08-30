@@ -3,8 +3,9 @@ package stratusv1
 import (
 	"time"
 
-	pb "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	pb "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 )
 
 // InputRecord is a record submitted to the stream via Add.

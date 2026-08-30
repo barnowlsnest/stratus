@@ -7,6 +7,7 @@ import (
 
 	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
+
 	"github.com/barnowlsnest/stratus/internal/dedup"
 )
 
@@ -23,7 +24,7 @@ type (
 	}
 
 	Storage struct {
-		maxReadBatchSize int
+		maxReadBatchSize uint64
 		wal              *wal.WAL
 		dup              *dedup.Deduplicator
 		subsWG           sync.WaitGroup
@@ -51,7 +52,7 @@ func WithDeduplicator(d *dedup.Deduplicator) Option {
 	}
 }
 
-func WithMaxReadBatchSize(size int) Option {
+func WithMaxReadBatchSize(size uint64) Option {
 	return func(s *Storage) {
 		s.maxReadBatchSize = size
 	}
@@ -309,7 +310,7 @@ func (s *Storage) validateRange(fromID, toID uint64) error {
 		return err
 	}
 
-	if int(toID-fromID+1) > s.maxReadBatchSize {
+	if toID-fromID+1 > s.maxReadBatchSize {
 		return ErrTooLongRangeToRead
 	}
 

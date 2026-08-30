@@ -7,10 +7,11 @@ import (
 	"context"
 	"time"
 
-	pb "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	pb "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 )
 
 // Client is a Stratus StreamService client.
@@ -118,7 +119,6 @@ func (c *Client) ReadOffset(ctx context.Context, startID, maxRecords uint64, tim
 		}
 	}()
 
-	// return fromProtoOutputRecords(resp.GetRecords()), nil
 	return out, nil
 }
 

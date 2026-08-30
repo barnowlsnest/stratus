@@ -20,13 +20,21 @@ tasks:
     cmds:
       - buf generate
 
-  go-build:
+  go-build-app:
     deps:
       - sanity
     cmds:
-      - rm -rf '{{.DIST}}'
-      - mkdir -p '{{.DIST}}'
-      - go build -o '{{.DIST}}' '{{.CMD_ROOT}}/app/stratus.go'
+      - rm -rf '{{.DIST}}/app'
+      - mkdir -p '{{.DIST}}/app'
+      - go build -o '{{.DIST}}/app' '{{.CMD_ROOT}}/app/stratus.go'
+
+  go-build-cli:
+    deps:
+      - sanity
+    cmds:
+      - rm -rf '{{.DIST}}/cli'
+      - mkdir -p '{{.DIST}}/cli'
+      - go build -o '{{.DIST}}/cli' '{{.CMD_ROOT}}/cli/stratuscli.go'
 
   go-fmt:
     cmds:
@@ -63,7 +71,7 @@ tasks:
 
   docker-push:
     deps:
-      - sanity
+      - docker-build
     cmds:
       - docker push {{.IMAGE}}:{{.TAG}}
 

@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/barnowlsnest/stratus/internal/storage"
-	"github.com/stretchr/testify/suite"
 )
 
 type StorageSuite struct {

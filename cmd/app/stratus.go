@@ -13,14 +13,15 @@ import (
 	"github.com/barnowlsnest/go-datalib/v5/pkg/lru"
 	"github.com/barnowlsnest/go-logslib/v2/pkg/logger"
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+
 	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"github.com/barnowlsnest/stratus/cmd/app/config"
 	"github.com/barnowlsnest/stratus/cmd/app/server"
 	"github.com/barnowlsnest/stratus/internal/dedup"
 	"github.com/barnowlsnest/stratus/internal/storage"
 	"github.com/barnowlsnest/stratus/internal/stream"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -29,9 +30,15 @@ const (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	appCfg, err := config.Load()
 	if err != nil {
-		log.Fatal("failed to load config: ", err)
+		return err
 	}
 
 	mainCtx := context.Background()
@@ -40,29 +47,30 @@ func main() {
 
 	appLogger, err := newLogger(appCfg)
 	if err != nil {
-		log.Fatal("failed to create logger: ", err)
+		return err
 	}
 
 	w, err := newWAL(appCfg, appLogger)
 	if err != nil {
-		log.Fatal("failed to create WAL: ", err)
+		return err
 	}
+
 	defer func() { _ = w.Close() }()
 
 	walStorage, err := newStorage(w, dedup.New(appCfg.DedupWindow))
 	if err != nil {
-		log.Fatal("failed to create storage: ", err)
+		return err
 	}
 
 	walStream, err := newStream(walStorage, lru.New[storage.Record](appCfg.CacheSize))
 	if err != nil {
-		log.Fatal("failed to create stream: ", err)
+		return err
 	}
 
 	addr := net.JoinHostPort(appCfg.Host, strconv.Itoa(appCfg.Port))
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatal("failed to listen: ", err)
+		return err
 	}
 
 	grpcServer := grpc.NewServer()
@@ -80,7 +88,7 @@ func main() {
 	})
 
 	if err := walStream.WaitForStart(sysCtx, startTimeout); err != nil {
-		log.Fatal("failed to start stream: ", err)
+		return err
 	}
 
 	appLogger.Info("stream is ready")
@@ -100,6 +108,8 @@ func main() {
 
 	appLogger.Info("stoping the stream: ", logger.Field{Key: "timeout", Value: stopTimeout.String()})
 	walStream.Stop(stopCtx)
+
+	return nil
 }
 
 func newLogger(cfg *config.Config) (*logger.Logger, error) {
@@ -120,9 +130,9 @@ func newLogger(cfg *config.Config) (*logger.Logger, error) {
 
 func newWAL(appCfg *config.Config, appLogger *logger.Logger) (*wal.WAL, error) {
 	w, re, err := wal.Open(appCfg.WALDir,
-		wal.WithBatchSize(8),
-		wal.WithMaxSegmentSize(64),
-		wal.WithMaxRecordSize(64),
+		wal.WithBatchSize(appCfg.WALBatchSize),
+		wal.WithMaxSegmentSize(appCfg.WALMaxSegmentSize),
+		wal.WithMaxRecordSize(appCfg.WALMaxRecordSize),
 		wal.WithLogger(appLogger),
 	)
 	if err != nil {
@@ -130,11 +140,11 @@ func newWAL(appCfg *config.Config, appLogger *logger.Logger) (*wal.WAL, error) {
 	}
 
 	appLogger.Info("wal: opened",
-		logger.Field{Key: "wal_dir", Value: appCfg.WALDir},
-		logger.Field{Key: "entries_recovered", Value: strconv.FormatInt(int64(re.EntriesRecovered), 10)},
-		logger.Field{Key: "segments_removed", Value: strconv.FormatInt(int64(re.SegmentsRemoved), 10)},
-		logger.Field{Key: "first_lsn", Value: strconv.FormatInt(int64(re.LastLSN), 10)},
-		logger.Field{Key: "last_lsn", Value: strconv.FormatInt(int64(re.LastLSN), 10)},
+		logger.StringField("wal_dir", appCfg.WALDir),
+		logger.Uint64Field("entries_recovered", re.EntriesRecovered),
+		logger.IntField("segments_removed", re.SegmentsRemoved),
+		logger.Uint64Field("first_lsn", re.FirstLSN),
+		logger.Uint64Field("last_lsn", re.LastLSN),
 	)
 
 	return w, nil
