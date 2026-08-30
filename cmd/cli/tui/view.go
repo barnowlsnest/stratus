@@ -182,20 +182,20 @@ func (m *Model) helpBar() string {
 	s := &m.styles
 
 	keys := [][2]string{
-		{"tab", "focus"},
+		{keyTab, "focus"},
 		{"↑↓", "select"},
-		{"enter", "run"},
+		{keyEnter, "run"},
 		{"a/d/r", "append/delete/reconcile"},
-		{"f", "follow"},
-		{"c", "clear"},
-		{"q", "quit"},
+		{keyFollow, "follow"},
+		{keyClear, "clear"},
+		{keyQuit, "quit"},
 	}
 
 	if m.form != nil {
 		keys = [][2]string{
-			{"tab", "field"},
-			{"enter", "submit"},
-			{"esc", "abort"},
+			{keyTab, "field"},
+			{keyEnter, "submit"},
+			{keyEscape, "abort"},
 		}
 	}
 

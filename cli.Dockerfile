@@ -13,14 +13,16 @@ RUN GOPRIVATE=github.com/barnowlsnest go mod download
 
 COPY . .
 
-# go-build-app runs sanity (fmt, vet, lint, test) first, then builds with
+# go-build-cli runs sanity (fmt, vet, lint, test) first, then builds with
 # -trimpath -ldflags="-s -w".
-RUN CGO_ENABLED=0 GOOS=linux task go-build-app
+RUN CGO_ENABLED=0 GOOS=linux task go-build-cli
 
 FROM gcr.io/distroless/static-debian12:nonroot
-WORKDIR /usr/wal
 WORKDIR /app
-COPY --from=builder /src/dist/app/stratus .
+COPY --from=builder /src/dist/cli/stratuscli .
+
+# The TUI needs a terminal type to pick its color profile; override with -e TERM.
+ENV TERM=xterm-256color
+
 USER nonroot:nonroot
-EXPOSE 8000
-ENTRYPOINT ["/app/stratus"]
+ENTRYPOINT ["/app/stratuscli"]

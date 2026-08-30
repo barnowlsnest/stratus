@@ -6,6 +6,7 @@ vars:
   DIST: ./dist
   CMD_ROOT: ./cmd
   IMAGE: barnowlsnest/stratus
+  IMAGE_CLI: barnowlsnest/stratuscli
   TAG: '{{.TAG | default "latest"}}'
 
 tasks:
@@ -26,7 +27,7 @@ tasks:
     cmds:
       - rm -rf '{{.DIST}}/app'
       - mkdir -p '{{.DIST}}/app'
-      - go build -o '{{.DIST}}/app' '{{.CMD_ROOT}}/app/stratus.go'
+      - CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o '{{.DIST}}/app' '{{.CMD_ROOT}}/app/stratus.go'
 
   go-build-cli:
     deps:
@@ -34,7 +35,7 @@ tasks:
     cmds:
       - rm -rf '{{.DIST}}/cli'
       - mkdir -p '{{.DIST}}/cli'
-      - go build -o '{{.DIST}}/cli' '{{.CMD_ROOT}}/cli/stratuscli.go'
+      - CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o '{{.DIST}}/cli' '{{.CMD_ROOT}}/cli/stratuscli.go'
 
   go-fmt:
     cmds:
@@ -46,7 +47,8 @@ tasks:
 
   go-test:
     cmds:
-      - go test -race -cover '{{.ALL}}'
+      # -race is cgo-only, so it must survive a CGO_ENABLED=0 environment.
+      - CGO_ENABLED=1 go test -race -cover '{{.ALL}}'
 
   go-lint:
     cmds:
@@ -68,6 +70,20 @@ tasks:
       - sanity
     cmds:
       - docker build -f app.Dockerfile -t {{.IMAGE}}:{{.TAG}} .
+
+  docker-build-cli:
+    deps:
+      - sanity
+    cmds:
+      - docker build -f cli.Dockerfile -t {{.IMAGE_CLI}}:{{.TAG}} .
+
+  docker-run-cli:
+    desc: Run the CLI in a container. Everything after `--` is passed to stratuscli,
+      e.g. `task docker-run-cli -- info` or `task docker-run-cli -- --tui`
+    deps:
+      - docker-build-cli
+    cmds:
+      - docker run --rm -it --network host {{.IMAGE_CLI}}:{{.TAG}} {{.CLI_ARGS}}
 
   docker-push:
     deps:
