@@ -17,16 +17,18 @@ go run ./cmd/cli/stratuscli.go --help
 goes through the same sanity gate as a local build.
 
 ```sh
-task docker-build-cli                       # -> barnowlsnest/stratuscli:latest
-docker build -f cli.Dockerfile -t stratuscli .
+task docker-build-cli                                        # -> barnowlsnest/stratuscli:latest
+docker build -f cli.Dockerfile -t barnowlsnest/stratuscli .  # the same build by hand
 ```
 
 Both modes work in the container. Command mode needs nothing special; the TUI needs a terminal,
-so pass `-it`:
+so pass `-it`. To reach the compose stack, join its network — compose prefixes it with the project
+name, so `stratus_net` becomes `stratus_stratus_net` (confirm with `docker network ls`), and the
+server answers to the service name `stratus`:
 
 ```sh
-docker run --rm --network stratus-net stratuscli --host stratus info
-docker run --rm -it --network stratus-net stratuscli --host stratus --tui
+docker run --rm --network stratus_stratus_net barnowlsnest/stratuscli --host stratus info
+docker run --rm -it --network stratus_stratus_net barnowlsnest/stratuscli --host stratus --tui
 ```
 
 `task docker-run-cli` wraps that second form — it builds the image, runs it with `-it` on the host
