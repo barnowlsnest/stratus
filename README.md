@@ -146,7 +146,7 @@ task go-build-app             # runs sanity (fmt, vet, lint, test), then builds 
 task go-build-cli             # same, for ./dist/cli/stratuscli
 task sanity                   # fmt, vet, lint, test
 task buf-gen                  # regenerate gRPC code from proto
-task docker-run               # build the server image and start it via compose
+task docker-run               # build the image and start it via compose
 task docker-build-cli         # build the CLI-only image from cli.Dockerfile
 task docker-run-cli -- info   # run the CLI in a container; args after `--` go to stratuscli
 task clear                    # remove ./dist
@@ -154,10 +154,23 @@ task clear                    # remove ./dist
 
 The image built by `app.Dockerfile` carries the server only; its builder stage installs `task` and
 `golangci-lint` (versions pinned as build args) and runs `task go-build-app`, so the image build
-goes through the same sanity gate as a local build. The compose service publishes `8000` and runs
-with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is mounted at `/app/config`, so the
-WAL directory itself is not on the volume. `cli.Dockerfile` builds a separate CLI-only image that
+goes through the same sanity gate as a local build. Compose is for local runs only: it starts the image `task docker-build` produces. The service
+publishes `8000` and runs with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is mounted at `/app/config`, so the WAL
+directory itself is not on the volume. `cli.Dockerfile` builds a separate CLI-only image that
 runs in both modes — see [`cmd/cli/README.md`](cmd/cli/README.md).
+
+## CI
+
+[`.github/workflows/docker.yml`](.github/workflows/docker.yml) lints the tree with `golangci-lint`
+first; only then does it build both images, on every pull request, publishing them from `main` and
+`v*` tags to GHCR as `ghcr.io/barnowlsnest/stratus` and `ghcr.io/barnowlsnest/stratuscli`. Each
+image is tagged with the commit it was built from (`:<sha>`), so a `v*` tag publishes under the
+commit that tag points at. It needs no secrets — the job's `packages: write` scope on
+`GITHUB_TOKEN` is enough. Since each image build runs `task sanity` in its builder stage, the
+workflow doubles as the test gate.
+
+Packages are created private on first publish; make them public under the package's settings on
+GitHub, or `docker login ghcr.io` with a PAT that has `read:packages` before pulling.
 
 ## CLI
 
