@@ -20,8 +20,62 @@ type AddRequestDTO struct {
 }
 
 type InputRecordDTO struct {
-	DedupKey uint64          `json:"dedup_key" yaml:"dedup_key"`
-	RawData  json.RawMessage `json:"raw_data" yaml:"raw_data"`
+	DedupKey uint64  `json:"dedup_key" yaml:"dedup_key"`
+	RawData  RawData `json:"raw_data" yaml:"raw_data"`
+}
+
+// RawData holds an opaque record payload. It accepts either a string holding a
+// JSON document or an inline JSON/YAML structure, and always carries the JSON
+// encoding of whatever was given.
+type RawData []byte
+
+func (d RawData) MarshalJSON() ([]byte, error) {
+	if len(d) == 0 {
+		return []byte("null"), nil
+	}
+
+	return d, nil
+}
+
+func (d *RawData) UnmarshalJSON(b []byte) error {
+	// A JSON string is unwrapped so that `"raw_data": "{}"` and
+	// `"raw_data": {}` end up with the same payload.
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+
+		*d = RawData(s)
+
+		return nil
+	}
+
+	*d = append((*d)[:0], b...)
+
+	return nil
+}
+
+func (d *RawData) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!str" {
+		*d = RawData(node.Value)
+
+		return nil
+	}
+
+	var v any
+	if err := node.Decode(&v); err != nil {
+		return err
+	}
+
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	*d = b
+
+	return nil
 }
 
 func NewAddFile(client *stratusv1.Client) (*cobra.Command, error) {
@@ -38,7 +92,7 @@ func NewAddFile(client *stratusv1.Client) (*cobra.Command, error) {
 		return nil, err
 	}
 
-	if err := addFileCmd.MarkFlagFilename(flagInputFile, "json", "csv"); err != nil {
+	if err := addFileCmd.MarkFlagFilename(flagInputFile, "json", "yaml", "yml", "csv"); err != nil {
 		return nil, err
 	}
 
@@ -68,8 +122,6 @@ func runAddFileFunc(client *stratusv1.Client) func(cmd *cobra.Command, args []st
 			return fmt.Errorf("failed to open file %s: %w", path, err)
 		}
 
-		json.NewDecoder(f)
-
 		defer func() { _ = f.Close() }()
 
 		var input *AddRequestDTO
@@ -80,7 +132,7 @@ func runAddFileFunc(client *stratusv1.Client) func(cmd *cobra.Command, args []st
 			if err != nil {
 				return fmt.Errorf("failed to parse JSON file %s: %w", path, err)
 			}
-		case "yaml", ".yml":
+		case ".yaml", ".yml":
 			input, err = fromYAML(f)
 			if err != nil {
 				return fmt.Errorf("failed to parse YAML file %s: %w", path, err)
@@ -152,7 +204,7 @@ func fromCSV(f *os.File) (*AddRequestDTO, error) {
 
 		dto.Records[i] = InputRecordDTO{
 			DedupKey: key,
-			RawData:  json.RawMessage(dataCell),
+			RawData:  RawData(dataCell),
 		}
 	}
 
