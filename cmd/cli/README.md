@@ -192,7 +192,9 @@ held, LRU and WAL counts, the cache-vs-disk split, throughput and the last sync 
 shows link state; a lost connection is reported in the viewer and the indicator turns red.
 
 **Commands** — `APPEND` and `DELETE` open a small form in the panel; `RECONCILE` runs straight
-away. Outcomes and errors land in the status bar, with the gRPC boilerplate stripped.
+away. Outcomes and errors land in the status bar, with the gRPC boilerplate stripped. A successful
+`DELETE` marks the truncation in the viewer and resumes follow, so a paused viewer snaps back to
+what the stream still holds.
 
 | Key                | Action                                                |
 |--------------------|-------------------------------------------------------|
