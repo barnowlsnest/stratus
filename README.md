@@ -161,13 +161,11 @@ runs in both modes — see [`cmd/cli/README.md`](cmd/cli/README.md).
 
 ## CI
 
-[`.github/workflows/docker.yml`](.github/workflows/docker.yml) lints the tree with `golangci-lint`
-first; only then does it build both images, on every pull request, publishing them from `main` and
-`v*` tags to GHCR as `ghcr.io/barnowlsnest/stratus` and `ghcr.io/barnowlsnest/stratuscli`. Each
-image is tagged with the commit it was built from (`:<sha>`), so a `v*` tag publishes under the
-commit that tag points at. It needs no secrets — the job's `packages: write` scope on
-`GITHUB_TOKEN` is enough. Since each image build runs `task sanity` in its builder stage, the
-workflow doubles as the test gate.
+[`.github/workflows/docker.yml`](.github/workflows/docker.yml) runs `task sanity` (fmt, vet, lint,
+test) on every pull request and push. Only a merge to `main` goes further and builds both images,
+publishing them to GHCR as `ghcr.io/barnowlsnest/stratus` and `ghcr.io/barnowlsnest/stratuscli`,
+each tagged with the merge commit (`:<sha>`). It needs no secrets — the job's `packages: write`
+scope on `GITHUB_TOKEN` is enough.
 
 Packages are created private on first publish; make them public under the package's settings on
 GitHub, or `docker login ghcr.io` with a PAT that has `read:packages` before pulling.
