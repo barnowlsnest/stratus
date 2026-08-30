@@ -1,4 +1,4 @@
-  # Barn Owls Nest / Stratus
+# Barn Owls Nest / Stratus
 
 Stratus is an append-only record stream served over gRPC and persisted in a write-ahead log.
 Records are appended with a client-supplied dedup key, assigned a monotonic ID (the WAL LSN),
@@ -13,19 +13,19 @@ arrive. A LRU cache in front of the WAL serves recent reads without touching the
   (`dedup_window`, default `1m`) causes the record to be dropped and counted as a duplicate.
 - **Stream range** — the inclusive `[start, end]` window of IDs currently in the WAL. `Delete`
   moves `start` forward; `Add` moves `end` forward.
- 
+
 ## API
 
 The service is `stratus.v1.StreamService`, defined in [`proto/stratus/v1/stratus.proto`](proto/stratus/v1/stratus.proto).
 
-| RPC             | Kind          | Purpose                                                         |
-|-----------------|---------------|-----------------------------------------------------------------|
-| `Add`           | unary         | Append a batch of records.                                      |
-| `ReadRange`     | unary         | Read the inclusive ID range `[start_id, end_id]`.               |
-| `ReadOffset`    | server stream | Read up to `max_records` from `start_id`, tailing for new ones. |
-| `Delete`        | unary         | Drop records up to and including `end_id`.                      |
-| `ReCache`       | unary         | Rebuild the in-memory cache from the WAL.                       |
-| `GetStreamInfo` | unary         | Report the current range and record counts.                     |
+| RPC              | Kind          | Purpose                                                         |
+|------------------|---------------|-----------------------------------------------------------------|
+| `Add`            | unary         | Append a batch of records.                                      |
+| `ReadRange`      | unary         | Read the inclusive ID range `[start_id, end_id]`.               |
+| `ReadOffset`     | server stream | Read up to `max_records` from `start_id`, tailing for new ones. |
+| `Delete`         | unary         | Drop records up to and including `end_id`.                      |
+| `ReconcileCache` | unary         | Rebuild the in-memory cache from the WAL.                       |
+| `GetStreamInfo`  | unary         | Report the current range and record counts.                     |
 
 ### Add
 
@@ -67,15 +67,16 @@ Removes records up to and including `end_id` and evicts them from the cache. Ret
 `deleted_records` and the remaining `stream_records`. An `end_id` of `0`, or one outside the
 current stream range, is `OUT_OF_RANGE`.
 
-Deletion is backed by the WAL's truncate plus a cut at the offset, so it reclaims whole segments;
-IDs at the deleted boundary may briefly remain readable.
+Deletion is backed by the WAL's truncate plus a cut at the offset, so it reclaims whole segments:
+`deleted_records` reports what was actually removed, which can be a shorter range than requested,
+and IDs at the boundary may briefly remain readable.
 
-### ReCache
+### ReconcileCache
 
-Reloads the cache from the WAL over the stream's current range and returns that range. Useful
-after a `Delete` or when the cache has been churned by cold reads. The reload streams the whole
-range record by record, so it is not bounded by the read cap; the LRU keeps the newest
-`cache_size` entries. The startup preload works the same way.
+Clears the cache and reloads it from the WAL over the stream's current range, then returns that
+range. Useful after a `Delete` or when the cache has been churned by cold reads. The reload
+streams the whole range record by record, so it is not bounded by the read cap; the LRU keeps the
+newest `cache_size` entries. The startup preload works the same way.
 
 ### GetStreamInfo
 
@@ -125,23 +126,43 @@ connection you keep owning (`Close` is then a no-op).
 
 Settings come from flags or environment variables of the same name (uppercased).
 
-| Name                  | Default     | Meaning                                                                                                                    |
-|-----------------------|-------------|----------------------------------------------------------------------------------------------------------------------------|
-| `host`                | `127.0.0.1` | listen host                                                                                                                |
-| `port`                | `8000`      | listen port                                                                                                                |
-| `wal_dir`             | —           | WAL segment directory (required)                                                                                           |
-| `log_level`           | `info`      | log level                                                                                                                  |
-| `dedup_window`        | `1m`        | how long a dedup key is remembered                                                                                         |
-| `cache_size`          | `4096`      | LRU capacity in records                                                                                                    |
-| `max_batch_read_size` | `1024`      | **not wired up**: the storage read cap stays at its default of 64; it bounds single `Read` batches only, not cache warming |
+| Name                   | Default     | Meaning                                                                                                                    |
+|------------------------|-------------|----------------------------------------------------------------------------------------------------------------------------|
+| `host`                 | `127.0.0.1` | listen host                                                                                                                |
+| `port`                 | `8000`      | listen port                                                                                                                |
+| `wal_dir`              | —           | WAL segment directory (required)                                                                                           |
+| `log_level`            | `info`      | log level                                                                                                                  |
+| `dedup_window`         | `1m`        | how long a dedup key is remembered                                                                                         |
+| `cache_size`           | `4096`      | LRU capacity in records                                                                                                    |
+| `wal_batch_size`       | `16`        | WAL records per fsync batch                                                                                                |
+| `wal_max_segment_size` | `64MB`      | segment size before rotation                                                                                               |
+| `wal_max_record_size`  | `8MB`       | largest single record the WAL accepts                                                                                      |
+| `max_batch_read_size`  | `1024`      | **not wired up**: the storage read cap stays at its default of 64; it bounds single `Read` batches only, not cache warming |
 
 ## Running
 
 ```sh
-task go-build     # runs sanity (fmt, vet, lint, test), then builds ./dist/stratus
-task sanity       # fmt, vet, lint, test
-task buf-gen      # regenerate gRPC code from proto
-task docker-run   # build the image and start it via compose
+task go-build-app   # runs sanity (fmt, vet, lint, test), then builds ./dist/app/stratus
+task go-build-cli   # same, for ./dist/cli/stratuscli
+task sanity         # fmt, vet, lint, test
+task buf-gen        # regenerate gRPC code from proto
+task docker-run     # build the image and start it via compose
+task clear          # remove ./dist
 ```
 
-The compose service listens on `8000` and keeps its WAL in a `stratus_wal` volume.
+The image built by `app.Dockerfile` carries the server only. The compose service publishes `8000`
+and runs with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is mounted at `/app/config`,
+so the WAL directory itself is not on the volume.
+
+## CLI
+
+`stratuscli` (in [`cmd/cli`](cmd/cli)) speaks to a running server: one command per RPC, plus a
+full-screen TUI console (`--tui`) with a live stream viewer, live stream info and an
+append/delete/reconcile menu. See [`cmd/cli/README.md`](cmd/cli/README.md).
+
+```sh
+stratuscli info
+stratuscli add -k 1 -d hello
+stratuscli offset -s 1 -m 100 --read-timeout 30s
+stratuscli --tui
+```
