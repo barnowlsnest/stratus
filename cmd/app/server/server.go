@@ -5,14 +5,15 @@ import (
 	"errors"
 	"time"
 
-	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
-	"github.com/barnowlsnest/stratus/internal/storage"
-	"github.com/barnowlsnest/stratus/internal/stream"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
+	"github.com/barnowlsnest/stratus/internal/storage"
+	"github.com/barnowlsnest/stratus/internal/stream"
 )
 
 var (
@@ -36,9 +37,9 @@ type (
 	}
 )
 
-func New(stream Stream) *Server {
+func New(s Stream) *Server {
 	return &Server{
-		stream: stream,
+		stream: s,
 	}
 }
 

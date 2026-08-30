@@ -3,8 +3,9 @@ package commands
 import (
 	"github.com/barnowlsnest/go-logslib/v2/pkg/logger"
 	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
-	"github.com/barnowlsnest/stratus/pkg/stratusv1"
 	"github.com/spf13/cobra"
+
+	"github.com/barnowlsnest/stratus/pkg/stratusv1"
 )
 
 func NewAdd(client *stratusv1.Client) (*cobra.Command, error) {

@@ -10,9 +10,10 @@ import (
 
 	"github.com/barnowlsnest/go-logslib/v2/pkg/logger"
 	"github.com/barnowlsnest/go-logslib/v2/pkg/sharedlog"
-	"github.com/barnowlsnest/stratus/pkg/stratusv1"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/barnowlsnest/stratus/pkg/stratusv1"
 )
 
 type AddRequestDTO struct {
@@ -117,7 +118,7 @@ func runAddFileFunc(client *stratusv1.Client) func(cmd *cobra.Command, args []st
 			return err
 		}
 
-		f, err := os.OpenFile(path, os.O_RDONLY, 0644)
+		f, err := os.OpenFile(path, os.O_RDONLY, 0600)
 		if err != nil {
 			return fmt.Errorf("failed to open file %s: %w", path, err)
 		}
