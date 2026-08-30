@@ -12,10 +12,9 @@ import (
 )
 
 type Options struct {
-	LogLevel string `name:"loglevel" default:"info" usage:"log level for the application"`
-	Host     string `name:"host" default:"127.0.0.1" usage:"stratus hostname"`
-	Port     int    `name:"port" default:"8000" usage:"stratus port"`
-	TUI      bool   `name:"tui" default:"false" usage:"enable TUI"`
+	Host string `name:"host" default:"127.0.0.1" usage:"stratus hostname"`
+	Port int    `name:"port" default:"8000" usage:"stratus port"`
+	TUI  bool   `name:"tui" default:"false" usage:"enable TUI"`
 
 	config *configs.Config
 }
