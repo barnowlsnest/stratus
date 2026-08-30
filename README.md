@@ -142,17 +142,22 @@ Settings come from flags or environment variables of the same name (uppercased).
 ## Running
 
 ```sh
-task go-build-app   # runs sanity (fmt, vet, lint, test), then builds ./dist/app/stratus
-task go-build-cli   # same, for ./dist/cli/stratuscli
-task sanity         # fmt, vet, lint, test
-task buf-gen        # regenerate gRPC code from proto
-task docker-run     # build the image and start it via compose
-task clear          # remove ./dist
+task go-build-app             # runs sanity (fmt, vet, lint, test), then builds ./dist/app/stratus
+task go-build-cli             # same, for ./dist/cli/stratuscli
+task sanity                   # fmt, vet, lint, test
+task buf-gen                  # regenerate gRPC code from proto
+task docker-run               # build the server image and start it via compose
+task docker-build-cli         # build the CLI-only image from cli.Dockerfile
+task docker-run-cli -- info   # run the CLI in a container; args after `--` go to stratuscli
+task clear                    # remove ./dist
 ```
 
-The image built by `app.Dockerfile` carries the server only. The compose service publishes `8000`
-and runs with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is mounted at `/app/config`,
-so the WAL directory itself is not on the volume.
+The image built by `app.Dockerfile` carries the server only; its builder stage installs `task` and
+`golangci-lint` (versions pinned as build args) and runs `task go-build-app`, so the image build
+goes through the same sanity gate as a local build. The compose service publishes `8000` and runs
+with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is mounted at `/app/config`, so the
+WAL directory itself is not on the volume. `cli.Dockerfile` builds a separate CLI-only image that
+runs in both modes — see [`cmd/cli/README.md`](cmd/cli/README.md).
 
 ## CLI
 

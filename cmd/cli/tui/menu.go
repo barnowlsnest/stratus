@@ -18,6 +18,13 @@ const (
 	cmdReconcile
 )
 
+// Command labels, shared by the menu and the form header.
+const (
+	labelAppend    = "APPEND"
+	labelDelete    = "DELETE"
+	labelReconcile = "RECONCILE"
+)
+
 type menuItem struct {
 	kind  commandKind
 	key   string
@@ -27,9 +34,9 @@ type menuItem struct {
 
 func newMenu() []menuItem {
 	return []menuItem{
-		{kind: cmdAppend, key: "a", label: "APPEND", hint: "push a record onto the stream"},
-		{kind: cmdDelete, key: "d", label: "DELETE", hint: "truncate the stream up to an id"},
-		{kind: cmdReconcile, key: "r", label: "RECONCILE", hint: "rebuild the in-memory cache"},
+		{kind: cmdAppend, key: "a", label: labelAppend, hint: "push a record onto the stream"},
+		{kind: cmdDelete, key: "d", label: labelDelete, hint: "truncate the stream up to an id"},
+		{kind: cmdReconcile, key: "r", label: labelReconcile, hint: "rebuild the in-memory cache"},
 	}
 }
 
@@ -55,7 +62,7 @@ func newForm(kind commandKind, s *styles, width int) *form {
 	case cmdAppend:
 		f = form{
 			kind:  kind,
-			title: "APPEND",
+			title: labelAppend,
 			fields: []field{
 				{label: "DEDUP KEY", placeholder: "uint64", numeric: true},
 				{label: "PAYLOAD", placeholder: "raw data"},
@@ -64,7 +71,7 @@ func newForm(kind commandKind, s *styles, width int) *form {
 	case cmdDelete:
 		f = form{
 			kind:  kind,
-			title: "DELETE",
+			title: labelDelete,
 			fields: []field{
 				{label: "END ID", placeholder: "truncate up to id", numeric: true},
 			},

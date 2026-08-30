@@ -11,6 +11,39 @@ task go-build-cli        # runs sanity, then builds ./dist/cli/stratuscli
 go run ./cmd/cli/stratuscli.go --help
 ```
 
+## In a container
+
+`cli.Dockerfile` builds a CLI-only image; its builder stage runs `task go-build-cli`, so the image
+goes through the same sanity gate as a local build.
+
+```sh
+task docker-build-cli                       # -> barnowlsnest/stratuscli:latest
+docker build -f cli.Dockerfile -t stratuscli .
+```
+
+Both modes work in the container. Command mode needs nothing special; the TUI needs a terminal,
+so pass `-it`:
+
+```sh
+docker run --rm --network stratus-net stratuscli --host stratus info
+docker run --rm -it --network stratus-net stratuscli --host stratus --tui
+```
+
+`task docker-run-cli` wraps that second form — it builds the image, runs it with `-it` on the host
+network, and passes everything after `--` to `stratuscli`:
+
+```sh
+task docker-run-cli -- info
+task docker-run-cli -- add -k 1 -d "hello world"
+task docker-run-cli -- --tui
+TAG=dev task docker-run-cli -- info
+```
+
+`--host` matters: the default `127.0.0.1` is the container itself. Point it at a service name on a
+shared network, at `host.docker.internal` for a server on the host, or run with `--network host`.
+The image sets `TERM=xterm-256color` for the TUI; override it with `-e TERM=...`. To read a file
+with `addfile`, mount it: `-v "$PWD/records.json:/data/records.json" … addfile -f /data/records.json`.
+
 ## Global options
 
 Every option is available as a flag or as an environment variable of the same name, uppercased.
