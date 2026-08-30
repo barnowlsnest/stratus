@@ -177,46 +177,75 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case addMsg:
-		if msg.err != nil {
-			m.status = status{text: "append failed: " + reason(msg.err), level: statusFail}
-			return m, nil
-		}
+		cmd := m.handleAdd(msg)
 
-		m.status = status{
-			text:  fmt.Sprintf("appended #%d (%d duplicate)", msg.res.AddedRecords.End, msg.res.DuplicateRecords),
-			level: statusOK,
-		}
-
-		return m, fetchInfoCmd(m.ctx(), m.client)
+		return m, cmd
 
 	case deleteMsg:
-		if msg.err != nil {
-			m.status = status{text: "delete failed: " + reason(msg.err), level: statusFail}
-			return m, nil
-		}
+		cmd := m.handleDelete(msg)
 
-		m.status = status{
-			text:  fmt.Sprintf("deleted #%d → #%d", msg.res.DeletedRecords.Start, msg.res.DeletedRecords.End),
-			level: statusOK,
-		}
-
-		return m, fetchInfoCmd(m.ctx(), m.client)
+		return m, cmd
 
 	case reconcileMsg:
-		if msg.err != nil {
-			m.status = status{text: "reconcile failed: " + reason(msg.err), level: statusFail}
-			return m, nil
-		}
+		cmd := m.handleReconcile(msg)
 
-		m.status = status{
-			text:  fmt.Sprintf("cache reconciled #%d → #%d", msg.rng.Start, msg.rng.End),
-			level: statusOK,
-		}
-
-		return m, fetchInfoCmd(m.ctx(), m.client)
+		return m, cmd
 	}
 
 	return m, nil
+}
+
+func (m *Model) handleAdd(msg addMsg) tea.Cmd {
+	if msg.err != nil {
+		m.status = status{text: "append failed: " + reason(msg.err), level: statusFail}
+
+		return nil
+	}
+
+	m.status = status{
+		text:  fmt.Sprintf("appended #%d (%d duplicate)", msg.res.AddedRecords.End, msg.res.DuplicateRecords),
+		level: statusOK,
+	}
+
+	return fetchInfoCmd(m.ctx(), m.client)
+}
+
+func (m *Model) handleDelete(msg deleteMsg) tea.Cmd {
+	if msg.err != nil {
+		m.status = status{text: "delete failed: " + reason(msg.err), level: statusFail}
+
+		return nil
+	}
+
+	m.status = status{
+		text:  fmt.Sprintf("deleted #%d → #%d", msg.res.DeletedRecords.Start, msg.res.DeletedRecords.End),
+		level: statusOK,
+	}
+
+	// The deleted records are gone from the stream, so snap back to the live end
+	// and keep showing what the stream actually holds.
+	m.append(eventLine(&m.styles, &m.styles.warn, time.Now(),
+		fmt.Sprintf("deleted #%d → #%d ▏ stream now #%d → #%d",
+			msg.res.DeletedRecords.Start, msg.res.DeletedRecords.End,
+			msg.res.StreamRecords.Start, msg.res.StreamRecords.End)))
+	m.refollow()
+
+	return fetchInfoCmd(m.ctx(), m.client)
+}
+
+func (m *Model) handleReconcile(msg reconcileMsg) tea.Cmd {
+	if msg.err != nil {
+		m.status = status{text: "reconcile failed: " + reason(msg.err), level: statusFail}
+
+		return nil
+	}
+
+	m.status = status{
+		text:  fmt.Sprintf("cache reconciled #%d → #%d", msg.rng.Start, msg.rng.End),
+		level: statusOK,
+	}
+
+	return fetchInfoCmd(m.ctx(), m.client)
 }
 
 func (m *Model) handleInfo(msg infoMsg) tea.Cmd {
@@ -325,8 +354,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if key == keyEnd || key == keyBottom {
-		m.follow = true
-		m.viewer.GotoBottom()
+		m.refollow()
 
 		return nil
 	}
@@ -421,6 +449,12 @@ func (m *Model) append(line string) {
 	if m.follow {
 		m.viewer.GotoBottom()
 	}
+}
+
+// refollow resumes live follow and jumps to the newest row.
+func (m *Model) refollow() {
+	m.follow = true
+	m.viewer.GotoBottom()
 }
 
 func (m *Model) resize(width, height int) {
