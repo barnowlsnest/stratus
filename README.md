@@ -162,10 +162,10 @@ runs in both modes — see [`cmd/cli/README.md`](cmd/cli/README.md).
 ## CI
 
 [`.github/workflows/docker.yml`](.github/workflows/docker.yml) runs `task sanity` (fmt, vet, lint,
-test) on every pull request and push. Only a merge to `main` goes further and builds both images,
-publishing them to GHCR as `ghcr.io/barnowlsnest/stratus` and `ghcr.io/barnowlsnest/stratuscli`,
-each tagged with the merge commit (`:<sha>`). It needs no secrets — the job's `packages: write`
-scope on `GITHUB_TOKEN` is enough.
+test) on every pull request and every push to `main`. Publishing a GitHub release then builds both
+images and pushes them to GHCR under the release tag, as
+`ghcr.io/barnowlsnest/stratus:<release>` and `ghcr.io/barnowlsnest/stratuscli:<release>`. It needs
+no secrets — the job's `packages: write` scope on `GITHUB_TOKEN` is enough.
 
 Packages are created private on first publish; make them public under the package's settings on
 GitHub, or `docker login ghcr.io` with a PAT that has `read:packages` before pulling.
