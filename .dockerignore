@@ -1,7 +1,11 @@
 .claude/
 dist/
 app.Dockerfile
-Taskfile.yml
 LICENSE
 compose.yaml
 .gitignore
+.git
+.idea/
+.env*
+*.local.json
+.DS_Store
