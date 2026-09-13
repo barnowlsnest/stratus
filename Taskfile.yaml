@@ -37,6 +37,17 @@ tasks:
       - mkdir -p '{{.DIST}}/cli'
       - CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o '{{.DIST}}/cli' '{{.CMD_ROOT}}/cli/stratuscli.go'
 
+  go-build-cli-dist:
+    desc: Build the CLI for linux/amd64, linux/arm64 and darwin/arm64
+    deps:
+      - sanity
+    cmds:
+      - rm -rf '{{.DIST}}/cli'
+      - mkdir -p '{{.DIST}}/cli'
+      - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o '{{.DIST}}/cli/stratuscli-linux-amd64' '{{.CMD_ROOT}}/cli/stratuscli.go'
+      - CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o '{{.DIST}}/cli/stratuscli-linux-arm64' '{{.CMD_ROOT}}/cli/stratuscli.go'
+      - CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o '{{.DIST}}/cli/stratuscli-darwin-arm64' '{{.CMD_ROOT}}/cli/stratuscli.go'
+
   go-fmt:
     cmds:
       - go fmt '{{.ALL}}'
