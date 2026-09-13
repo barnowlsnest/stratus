@@ -5,9 +5,11 @@ package stratusv1
 
 import (
 	"context"
+	"crypto/tls"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -40,6 +42,33 @@ func Dial(target string, opts ...grpc.DialOption) (*Client, error) {
 func WithInsecure() grpc.DialOption {
 	return grpc.WithTransportCredentials(insecure.NewCredentials())
 }
+
+func WithTLS(caFile string) (grpc.DialOption, error) {
+	if caFile == "" {
+		return grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})), nil
+	}
+
+	creds, err := credentials.NewClientTLSFromFile(caFile, "")
+	if err != nil {
+		return nil, err
+	}
+
+	return grpc.WithTransportCredentials(creds), nil
+}
+
+func WithToken(token string) grpc.DialOption {
+	return grpc.WithPerRPCCredentials(tokenCredentials{token: token})
+}
+
+type tokenCredentials struct {
+	token string
+}
+
+func (c tokenCredentials) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + c.token}, nil
+}
+
+func (tokenCredentials) RequireTransportSecurity() bool { return false }
 
 // Close closes the underlying connection when the client owns it (created via
 // Dial). It is a no-op for clients created with New.

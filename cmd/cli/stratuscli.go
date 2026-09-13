@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/pflag"
+	"google.golang.org/grpc"
 
 	"github.com/barnowlsnest/stratus/cmd/cli/commands"
 	"github.com/barnowlsnest/stratus/cmd/cli/options"
@@ -36,7 +37,12 @@ func run() error {
 	defer stop()
 
 	addr := net.JoinHostPort(opts.Host, strconv.Itoa(opts.Port))
-	client, err := stratusv1.Dial(addr, stratusv1.WithInsecure())
+	dialOpts, err := dialOptions(opts)
+	if err != nil {
+		return err
+	}
+
+	client, err := stratusv1.Dial(addr, dialOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to dial stratus: %w", err)
 	}
@@ -48,6 +54,24 @@ func run() error {
 	}
 
 	return runOnlyCommands(ctx, globalFlags, client)
+}
+
+func dialOptions(opts *options.Options) ([]grpc.DialOption, error) {
+	transport := stratusv1.WithInsecure()
+	if opts.TLS || opts.TLSCAFile != "" {
+		var err error
+		transport, err = stratusv1.WithTLS(opts.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load tls credentials: %w", err)
+		}
+	}
+
+	dialOpts := []grpc.DialOption{transport}
+	if opts.AuthToken != "" {
+		dialOpts = append(dialOpts, stratusv1.WithToken(opts.AuthToken))
+	}
+
+	return dialOpts, nil
 }
 
 func runTUI(ctx context.Context, client *stratusv1.Client, opts *options.Options) error {

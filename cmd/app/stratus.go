@@ -15,6 +15,7 @@ import (
 	"github.com/barnowlsnest/go-wallib/pkg/wal"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"github.com/barnowlsnest/stratus/cmd/app/config"
@@ -73,7 +74,12 @@ func run() error {
 		return err
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer, err := newGRPCServer(appCfg, appLogger)
+	if err != nil {
+		_ = lis.Close()
+		return err
+	}
+
 	stratusv1.RegisterStreamServiceServer(grpcServer, server.New(walStream))
 
 	var g errgroup.Group
@@ -126,6 +132,32 @@ func newLogger(cfg *config.Config) (*logger.Logger, error) {
 	})
 
 	return appLogger, nil
+}
+
+func newGRPCServer(cfg *config.Config, appLogger *logger.Logger) (*grpc.Server, error) {
+	var opts []grpc.ServerOption
+
+	if cfg.TLSEnabled() {
+		creds, err := credentials.NewServerTLSFromFile(cfg.TLSCertFile, cfg.TLSKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load tls credentials: %w", err)
+		}
+
+		opts = append(opts, grpc.Creds(creds))
+	} else {
+		appLogger.Warn("grpc: TLS disabled, traffic (including the auth token) is plaintext")
+	}
+
+	if cfg.AuthToken != "" {
+		opts = append(opts,
+			grpc.UnaryInterceptor(server.UnaryAuthInterceptor(cfg.AuthToken)),
+			grpc.StreamInterceptor(server.StreamAuthInterceptor(cfg.AuthToken)),
+		)
+	} else {
+		appLogger.Warn("grpc: authentication disabled, set AUTH_TOKEN to require it")
+	}
+
+	return grpc.NewServer(opts...), nil
 }
 
 func newWAL(appCfg *config.Config, appLogger *logger.Logger) (*wal.WAL, error) {
