@@ -1,4 +1,5 @@
-FROM golang:1.26 AS builder
+# The builder runs natively and cross-compiles, so multi-arch builds don't need emulation.
+FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
 
 # Pinned so the image build is reproducible; bump with --build-arg or here.
 ARG TASK_VERSION=v3.53.1
@@ -13,9 +14,13 @@ RUN GOPRIVATE=github.com/barnowlsnest go mod download
 
 COPY . .
 
-# go-build-app runs sanity (fmt, vet, lint, test) first, then builds with
-# -trimpath -ldflags="-s -w".
-RUN CGO_ENABLED=0 GOOS=linux task go-build-app
+# Sanity (fmt, vet, lint, test) runs natively; only the final build targets TARGETARCH.
+RUN task sanity
+
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o dist/app/stratus ./cmd/app/stratus.go
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /usr/wal

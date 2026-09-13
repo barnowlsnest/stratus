@@ -1,6 +1,6 @@
 services:
   stratus:
-    image: barnowlsnest/stratus:latest
+    image: ghcr.io/barnowlsnest/stratus:v1.0.0
     container_name: stratus
     restart: on-failure
     networks:
