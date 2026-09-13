@@ -1,6 +1,6 @@
 services:
   stratus:
-    image: ghcr.io/barnowlsnest/stratus:v1.0.0
+    image: barnowlsnest/stratus:latest
     container_name: stratus
     restart: on-failure
     networks:
@@ -8,7 +8,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - stratus_wal:/app/config
+      - stratus_wal:/usr/wal
     environment:
       - HOST=0.0.0.0
       - LOG_LEVEL=debug
