@@ -8,13 +8,15 @@ plain command mode that prints one structured log line per result, and a full-sc
 
 ```sh
 task go-build-cli        # runs sanity, then builds ./dist/cli/stratuscli
+task go-build-cli-dist   # runs sanity, then builds ./dist/cli/stratuscli-{linux-amd64,linux-arm64,darwin-arm64}
 go run ./cmd/cli/stratuscli.go --help
 ```
 
 ## In a container
 
-`cli.Dockerfile` builds a CLI-only image; its builder stage runs `task go-build-cli`, so the image
-goes through the same sanity gate as a local build.
+`cli.Dockerfile` builds a CLI-only image; its builder stage runs `task sanity`, then cross-compiles
+`dist/cli/stratuscli` for the target platform, so the image goes through the same sanity gate as a
+local build.
 
 ```sh
 task docker-build-cli                                        # -> barnowlsnest/stratuscli:latest

@@ -2,7 +2,7 @@
 dist/
 app.Dockerfile
 LICENSE
-compose.yaml
+compose.*
 .gitignore
 .git
 .idea/

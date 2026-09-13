@@ -179,6 +179,7 @@ Leave both unset and it serves plaintext, also with a warning; setting only one 
 ```sh
 task go-build-app             # runs sanity (fmt, vet, lint, test), then builds ./dist/app/stratus
 task go-build-cli             # same, for ./dist/cli/stratuscli
+task go-build-cli-dist        # same, cross-built to ./dist/cli/stratuscli-{linux-amd64,linux-arm64,darwin-arm64}
 task sanity                   # fmt, vet, lint, test
 task buf-gen                  # regenerate gRPC code from proto
 task docker-run               # build the image and start it via compose
@@ -188,11 +189,12 @@ task clear                    # remove ./dist
 ```
 
 The image built by `app.Dockerfile` carries the server only; its builder stage installs `task` and
-`golangci-lint` (versions pinned as build args) and runs `task go-build-app`, so the image build
-goes through the same sanity gate as a local build. `compose.yaml` is for local/demo runs only —
+`golangci-lint` (versions pinned as build args), runs `task sanity`, then cross-compiles
+`dist/app/stratus` for the target platform, so the image build goes through the same sanity gate as
+a local build. `dist/` is in `.dockerignore`, so local build output never reaches the image. `compose.local.yaml` is for local/demo runs only —
 it starts the image `task docker-build` produces, unauthenticated and without TLS, publishes `8000`
-on the host's loopback only, and runs with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is
-mounted at `/app/config`, so the WAL directory itself is not on the volume. `cli.Dockerfile` builds
+on the host's loopback only, and runs with `WAL_DIR=/usr/wal` on the `stratus_wal` volume, so the WAL
+survives container restarts. `cli.Dockerfile` builds
 a separate CLI-only image that runs in both modes — see [`cmd/cli/README.md`](cmd/cli/README.md).
 
 ## CI

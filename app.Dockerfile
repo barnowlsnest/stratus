@@ -22,8 +22,12 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w" -o dist/app/stratus ./cmd/app/stratus.go
 
+# Distroless has no shell to chown with, so the WAL dir is made here and copied over owned by
+# nonroot; a named volume mounted there inherits that ownership.
+RUN mkdir -p /out/wal
+
 FROM gcr.io/distroless/static-debian12:nonroot
-WORKDIR /usr/wal
+COPY --from=builder --chown=nonroot:nonroot /out/wal /usr/wal
 WORKDIR /app
 COPY --from=builder /src/dist/app/stratus .
 USER nonroot:nonroot
