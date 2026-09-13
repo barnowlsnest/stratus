@@ -24,15 +24,17 @@ docker build -f cli.Dockerfile -t barnowlsnest/stratuscli .  # the same by hand
 Both modes work in the container. Command mode needs nothing special; the TUI needs a terminal,
 so pass `-it`. To reach the compose stack, join its network — compose prefixes it with the project
 name, so `stratus_net` becomes `stratus_stratus_net` (confirm with `docker network ls`), and the
-server answers to the service name `stratus`:
+server answers to the service name `stratus`. `AUTH_TOKEN`/`--tls`/`--tls_ca_file` are only needed
+if you opted the server into them (see the main [README](../../README.md#security)):
 
 ```sh
-docker run --rm --network stratus_stratus_net barnowlsnest/stratuscli --host stratus info
-docker run --rm -it --network stratus_stratus_net barnowlsnest/stratuscli --host stratus --tui
+docker run --rm -e AUTH_TOKEN="$STRATUS_AUTH_TOKEN" --network stratus_stratus_net barnowlsnest/stratuscli --host stratus info
+docker run --rm -it -e AUTH_TOKEN="$STRATUS_AUTH_TOKEN" --network stratus_stratus_net barnowlsnest/stratuscli --host stratus --tui
 ```
 
 `task docker-run-cli` wraps that second form — it builds the image, runs it with `-it` on the host
-network, and passes everything after `--` to `stratuscli`:
+network, forwards `STRATUS_AUTH_TOKEN` as `AUTH_TOKEN`, and passes everything after `--` to
+`stratuscli`:
 
 ```sh
 task docker-run-cli -- info
@@ -51,14 +53,17 @@ with `addfile`, mount it: `-v "$PWD/records.json:/data/records.json" … addfile
 Every option is available as a flag or as an environment variable of the same name, uppercased.
 They apply to both modes.
 
-| Flag     | Env    | Default     | Meaning                                                |
-|----------|--------|-------------|--------------------------------------------------------|
-| `--host` | `HOST` | `127.0.0.1` | stratus hostname                                       |
-| `--port` | `PORT` | `8000`      | stratus port                                           |
-| `--tui`  | `TUI`  | `false`     | start the full-screen TUI instead of running a command |
+| Flag            | Env           | Default     | Meaning                                                |
+|-----------------|---------------|-------------|--------------------------------------------------------|
+| `--host`        | `HOST`        | `127.0.0.1` | stratus hostname                                       |
+| `--port`        | `PORT`        | `8000`      | stratus port                                           |
+| `--tui`         | `TUI`         | `false`     | start the full-screen TUI instead of running a command |
+| —               | `AUTH_TOKEN`  | —           | bearer token sent with every call (env only)           |
+| `--tls`         | `TLS`         | `false`     | connect over TLS, verifying against system roots       |
+| `--tls_ca_file` | `TLS_CA_FILE` | —           | PEM CA to verify the server; implies `--tls`           |
 
-The client is built once, before the command runs, over an insecure (no TLS) connection. `SIGINT`
-and `SIGTERM` cancel the in-flight call and shut it down.
+The client is built once, before the command runs. Without `--tls` or `--tls_ca_file` the
+connection is plaintext. `SIGINT` and `SIGTERM` cancel the in-flight call and shut it down.
 
 ## Commands
 

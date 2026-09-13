@@ -1,10 +1,13 @@
 package config
 
 import (
+	"errors"
 	"time"
 
 	"github.com/barnowlsnest/go-configlib/v2/pkg/configs"
 )
+
+var ErrIncompleteTLS = errors.New("config: tls_cert_file and tls_key_file must be set together")
 
 const (
 	// DefaultWALBatchSize is the number of records the wal groups into a single fsync batch.
@@ -26,12 +29,31 @@ type Config struct {
 	Port              int           `name:"port" default:"8000" usage:"port to listen on"`
 	WALBatchSize      int           `name:"wal_batch_size" usage:"number of wal records per fsync batch"`
 	WALMaxRecordSize  int           `name:"wal_max_record_size" usage:"maximum wal record size in bytes"`
+	AuthToken         string        `name:"auth_token" flag:"-" usage:"bearer token clients must present"`
+	TLSCertFile       string        `name:"tls_cert_file" usage:"PEM certificate file"`
+	TLSKeyFile        string        `name:"tls_key_file" usage:"PEM private key file"`
+}
+
+func (c *Config) TLSEnabled() bool {
+	return c.TLSCertFile != "" && c.TLSKeyFile != ""
+}
+
+func (c *Config) Validate() error {
+	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
+		return ErrIncompleteTLS
+	}
+
+	return nil
 }
 
 func Load() (*Config, error) {
 	var cfg Config
 	_, err := configs.Resolve(&cfg, "")
 	if err != nil {
+		return nil, err
+	}
+
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 

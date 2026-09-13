@@ -99,7 +99,12 @@ Returns the stream `range`, `cached_records` (entries currently in the LRU) and 
 protobuf package.
 
 ```go
-c, err := stratusv1.Dial("127.0.0.1:8000", stratusv1.WithInsecure())
+tlsOpt, err := stratusv1.WithTLS("ca.pem") // "" verifies against system roots
+if err != nil {
+    return err
+}
+
+c, err := stratusv1.Dial("stratus.example:8000", tlsOpt, stratusv1.WithToken(os.Getenv("AUTH_TOKEN")))
 if err != nil {
     return err
 }
@@ -120,7 +125,8 @@ for r := range ch {
 ```
 
 `Dial` gives the client ownership of the connection (`Close` shuts it down); `New` wraps a
-connection you keep owning (`Close` is then a no-op).
+connection you keep owning (`Close` is then a no-op). Against a loopback server without TLS, use
+`stratusv1.WithInsecure()` instead of `WithTLS`.
 
 ## Configuration
 
@@ -138,6 +144,35 @@ Settings come from flags or environment variables of the same name (uppercased).
 | `wal_max_segment_size` | `64MB`      | segment size before rotation                                                                                               |
 | `wal_max_record_size`  | `8MB`       | largest single record the WAL accepts                                                                                      |
 | `max_batch_read_size`  | `1024`      | **not wired up**: the storage read cap stays at its default of 64; it bounds single `Read` batches only, not cache warming |
+| `auth_token`           | —           | bearer token every RPC must carry; env `AUTH_TOKEN` only, no flag; optional                                                |
+| `tls_cert_file`        | —           | PEM certificate; enables TLS together with `tls_key_file`                                                                  |
+| `tls_key_file`         | —           | PEM private key; enables TLS together with `tls_cert_file`                                                                 |
+
+### Security
+
+Auth and TLS are both opt-in and off by default: a bare `stratus` runs unauthenticated and in
+plaintext, on any host. Turn either on for a deployment reachable beyond a network you trust; skip
+them when that trust boundary is already handled upstream, e.g. behind a gateway or service mesh
+that terminates TLS and auth itself.
+
+**Token auth** — set `AUTH_TOKEN` on the server to require `authorization: Bearer <AUTH_TOKEN>` on
+every RPC, streaming ones included:
+
+```sh
+AUTH_TOKEN=$(openssl rand -hex 32) WAL_DIR=/var/lib/stratus stratus
+```
+
+Clients pass the same value: `stratusv1.WithToken(token)` in Go, or `--auth_token`/`AUTH_TOKEN` on
+`stratuscli`. Leave `AUTH_TOKEN` unset and the server logs a warning and accepts every call.
+
+**TLS** — set `tls_cert_file` and `tls_key_file` together to serve over TLS:
+
+```sh
+TLS_CERT_FILE=server.crt TLS_KEY_FILE=server.key WAL_DIR=/var/lib/stratus stratus
+```
+
+Clients connect with `stratusv1.WithTLS(caFile)` in Go, or `--tls`/`--tls_ca_file` on `stratuscli`.
+Leave both unset and it serves plaintext, also with a warning; setting only one is a config error.
 
 ## Running
 
@@ -154,10 +189,11 @@ task clear                    # remove ./dist
 
 The image built by `app.Dockerfile` carries the server only; its builder stage installs `task` and
 `golangci-lint` (versions pinned as build args) and runs `task go-build-app`, so the image build
-goes through the same sanity gate as a local build. Compose is for local runs only: it starts the image `task docker-build` produces. The service
-publishes `8000` and runs with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is mounted at `/app/config`, so the WAL
-directory itself is not on the volume. `cli.Dockerfile` builds a separate CLI-only image that
-runs in both modes — see [`cmd/cli/README.md`](cmd/cli/README.md).
+goes through the same sanity gate as a local build. `compose.yaml` is for local/demo runs only —
+it starts the image `task docker-build` produces, unauthenticated and without TLS, publishes `8000`
+on the host's loopback only, and runs with `WAL_DIR=/usr/wal`; note that the `stratus_wal` volume is
+mounted at `/app/config`, so the WAL directory itself is not on the volume. `cli.Dockerfile` builds
+a separate CLI-only image that runs in both modes — see [`cmd/cli/README.md`](cmd/cli/README.md).
 
 ## CI
 

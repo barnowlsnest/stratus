@@ -15,6 +15,10 @@ type Options struct {
 	Host  string `name:"host" default:"127.0.0.1" usage:"stratus hostname"`
 	Port  int    `name:"port" default:"8000" usage:"stratus port"`
 	IsTUI bool   `name:"tui" default:"false" usage:"enable TUI"`
+	// AuthToken is env-only (AUTH_TOKEN) so it never shows up in process args.
+	AuthToken string `name:"auth_token" flag:"-" usage:"bearer token sent to stratus"`
+	TLS       bool   `name:"tls" default:"false" usage:"connect over TLS"`
+	TLSCAFile string `name:"tls_ca_file" usage:"PEM CA file to verify the server; implies --tls"`
 
 	config *configs.Config
 }
