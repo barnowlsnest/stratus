@@ -1,9 +1,52 @@
-# Barn Owls Nest / Stratus
+# Stratus
 
-Stratus is an append-only record stream served over gRPC and persisted in a write-ahead log.
+[![CI](https://github.com/barnowlsnest/stratus/actions/workflows/docker.yml/badge.svg)](https://github.com/barnowlsnest/stratus/actions/workflows/docker.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/barnowlsnest/stratus.svg)](https://pkg.go.dev/github.com/barnowlsnest/stratus)
+[![Go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**An append-only record stream served over gRPC, persisted in a write-ahead log.**
+
 Records are appended with a client-supplied dedup key, assigned a monotonic ID (the WAL LSN),
 and read back by ID — either as a bounded range or as a live tail that blocks until new records
 arrive. A LRU cache in front of the WAL serves recent reads without touching the filesystem.
+
+## Install
+
+The server and CLI ship as container images on GHCR, tagged by release:
+
+```sh
+docker pull ghcr.io/barnowlsnest/stratus:<release>     # server
+docker pull ghcr.io/barnowlsnest/stratuscli:<release>  # CLI
+```
+
+Each release also carries prebuilt `stratuscli` binaries for `linux-amd64`, `linux-arm64` and
+`darwin-arm64` — grab one from the [releases page](https://github.com/barnowlsnest/stratus/releases).
+With a Go toolchain, `go install github.com/barnowlsnest/stratus/cmd/cli@latest` works too, though
+it names the binary `cli`; rename it if you want `stratuscli` on your `PATH`.
+
+To talk to a server from your own Go code, take the client package only:
+
+```sh
+go get github.com/barnowlsnest/stratus
+```
+
+## Quick start
+
+`wal_dir` is the only required setting. Run the server, then point the CLI at it:
+
+```sh
+mkdir -p /tmp/stratus-wal
+WAL_DIR=/tmp/stratus-wal stratus          # or: task docker-run
+
+stratuscli add -k 1 -d hello              # append one record
+stratuscli get                            # read the whole stream
+stratuscli info                           # range and record counts
+stratuscli --tui                          # full-screen console
+```
+
+That runs unauthenticated and in plaintext on loopback — see [Security](#security) before exposing
+it anywhere else.
 
 ## Concepts
 
@@ -174,7 +217,7 @@ TLS_CERT_FILE=server.crt TLS_KEY_FILE=server.key WAL_DIR=/var/lib/stratus stratu
 Clients connect with `stratusv1.WithTLS(caFile)` in Go, or `--tls`/`--tls_ca_file` on `stratuscli`.
 Leave both unset and it serves plaintext, also with a warning; setting only one is a config error.
 
-## Running
+## Building from source
 
 Building from source needs Go (the version in [`go.mod`](go.mod) — currently 1.27.1),
 [Task](https://taskfile.dev), `golangci-lint` v2.13.2 and, for `buf-*`, [buf](https://buf.build).
@@ -230,3 +273,30 @@ stratuscli add -k 1 -d hello
 stratuscli offset -s 1 -m 100 --read-timeout 30s
 stratuscli --tui
 ```
+
+## Layout
+
+| Path                | What lives there                                                 |
+|---------------------|------------------------------------------------------------------|
+| `proto/`, `api/`    | service definition, and the buf-generated stubs (`task buf-gen`) |
+| `cmd/app/`          | the server: config, gRPC handlers, wiring                        |
+| `cmd/cli/`          | `stratuscli` — one command per RPC, plus the TUI                 |
+| `internal/stream/`  | the LRU cache over the WAL, and the live-tail fan-out            |
+| `internal/storage/` | WAL access, range validation, dedup on write                     |
+| `pkg/stratusv1/`    | the public Go client and its DTOs                                |
+
+## Contributing
+
+Issues and pull requests are welcome. A few things that will save a round trip:
+
+- Run `task sanity` (fmt, vet, lint, test) before pushing — CI runs the same gate on every PR, and
+  so do the build and image tasks.
+- Change `proto/stratus/v1/stratus.proto` and regenerate with `task buf-gen`; never hand-edit
+  `api/grpc/`. A wire change usually needs a matching update to the DTOs in `pkg/stratusv1`.
+- Tests are `testify/suite` suites with table-driven cases; add yours next to the code it covers.
+- Commit subjects follow the `type(scope): summary` shape already in the history (`fix`, `feat`,
+  `chore`, `infra`, `sec`).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
