@@ -67,9 +67,9 @@ Removes records up to and including `end_id` and evicts them from the cache. Ret
 `deleted_records` and the remaining `stream_records`. An `end_id` of `0`, or one outside the
 current stream range, is `OUT_OF_RANGE`.
 
-Deletion is backed by the WAL's truncate plus a cut at the offset, so it reclaims whole segments:
-`deleted_records` reports what was actually removed, which can be a shorter range than requested,
-and IDs at the boundary may briefly remain readable.
+Deletion truncates the WAL to `end_id` and then cuts it at that offset, so removal is exact rather
+than segment-granular: `deleted_records` is the range that is really gone, and nothing at the
+boundary stays readable afterwards.
 
 ### ReconcileCache
 
@@ -176,12 +176,19 @@ Leave both unset and it serves plaintext, also with a warning; setting only one 
 
 ## Running
 
+Building from source needs Go (the version in [`go.mod`](go.mod) — currently 1.27.1),
+[Task](https://taskfile.dev), `golangci-lint` v2.13.2 and, for `buf-*`, [buf](https://buf.build).
+Only Docker is needed for the container tasks.
+
 ```sh
 task go-build-app             # runs sanity (fmt, vet, lint, test), then builds ./dist/app/stratus
 task go-build-cli             # same, for ./dist/cli/stratuscli
 task go-build-cli-dist        # same, cross-built to ./dist/cli/stratuscli-{linux-amd64,linux-arm64,darwin-arm64}
 task sanity                   # fmt, vet, lint, test
 task buf-gen                  # regenerate gRPC code from proto
+task buf-build                # update proto deps and build the descriptor set
+task docker-build             # build the server image (app.Dockerfile)
+task docker-push              # build and push it to the registry
 task docker-run               # build the image and start it via compose
 task docker-build-cli         # build the CLI-only image from cli.Dockerfile
 task docker-run-cli -- info   # run the CLI in a container; args after `--` go to stratuscli
@@ -204,6 +211,9 @@ test) on every pull request and every push to `main`. Publishing a GitHub releas
 images and pushes them to GHCR under the release tag, as
 `ghcr.io/barnowlsnest/stratus:<release>` and `ghcr.io/barnowlsnest/stratuscli:<release>`. It needs
 no secrets — the job's `packages: write` scope on `GITHUB_TOKEN` is enough.
+
+The same release event also runs `task go-build-cli-dist` and attaches the standalone
+`stratuscli-{linux-amd64,linux-arm64,darwin-arm64}` binaries to the release.
 
 Packages are created private on first publish; make them public under the package's settings on
 GitHub, or `docker login ghcr.io` with a PAT that has `read:packages` before pulling.
