@@ -1,5 +1,5 @@
 # The builder runs natively and cross-compiles, so multi-arch builds don't need emulation.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27 AS builder
 
 # Pinned so the image build is reproducible; bump with --build-arg or here.
 ARG TASK_VERSION=v3.53.1
