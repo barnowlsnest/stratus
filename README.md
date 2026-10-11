@@ -220,7 +220,7 @@ Leave both unset and it serves plaintext, also with a warning; setting only one 
 ## Building from source
 
 Building from source needs Go (the version in [`go.mod`](go.mod) — currently 1.27.1),
-[Task](https://taskfile.dev), `golangci-lint` v2.13.2 and, for `buf-*`, [buf](https://buf.build).
+[Task](https://taskfile.dev), `golangci-lint` v2.14.0 and, for `buf-*`, [buf](https://buf.build).
 Only Docker is needed for the container tasks.
 
 ```sh

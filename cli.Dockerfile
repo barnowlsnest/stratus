@@ -3,7 +3,7 @@ FROM --platform=$BUILDPLATFORM golang:1.27 AS builder
 
 # Pinned so the image build is reproducible; bump with --build-arg or here.
 ARG TASK_VERSION=v3.53.1
-ARG GOLANGCI_LINT_VERSION=v2.13.2
+ARG GOLANGCI_LINT_VERSION=v2.14.0
 
 RUN go install github.com/go-task/task/v3/cmd/task@${TASK_VERSION} && \
     go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
