@@ -76,7 +76,7 @@ connection is plaintext. `SIGINT` and `SIGTERM` cancel the in-flight call and sh
 | `offset`    | —                    | tail the stream from an id                        |
 | `add`       | `a`, `append`        | append one record                                 |
 | `addfile`   | `af`                 | append a batch read from a JSON, YAML or CSV file |
-| `delete`    | `d`, `del`           | truncate the stream up to an id                   |
+| `delete`    | `d`, `del`           | delete the records before an id                   |
 | `reconcile` | `re`, `rec`          | rebuild the in-memory cache from the WAL          |
 
 Results are written to stdout as structured JSON log lines; a failed call exits non-zero with the
@@ -178,9 +178,8 @@ input:
 
 ### delete
 
-Truncates the stream up to and including `--end-id` and reports the range actually removed. The
-WAL reclaims whole segments, so the reported range can be shorter than requested and ids at the
-boundary may stay readable for a while.
+Deletes every record before `--end-id` and reports the range removed. The record at `--end-id`
+stays and becomes the first record.
 
 ```sh
 stratuscli delete -e 2
