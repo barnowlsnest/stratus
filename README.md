@@ -101,11 +101,7 @@ timeout expires. Unlike `ReadRange`, it does not end at the current tail: when i
 blocks until `Add` produces more records, then keeps sending. Records already deleted from under
 the reader (`start_id` below the stream's first ID) end the stream with `OUT_OF_RANGE`.
 
-The stream ends one record early in two cases, because the handler stops once its next ID reaches
-`start_id + max_records - 1`: a `max_records` of `1` sends nothing, and a reader that catches up with
-the tail receives `max_records - 1` records. A read of records that already exist, with
-`max_records` of 2 or more, sends all of them. To receive exactly `n` while tailing, ask for `n + 1`
-and stop after `n`.
+The stream stops once its next ID reaches `start_id + max_records - 1`, so every request sends at most `max_records - 1` records; a `max_records` of `1` sends nothing. If it catches up with the current tail before reaching that limit, it waits for new records until the timeout or limit. To receive exactly `n` while tailing, ask for `n + 1` and stop after `n`.
 
 `max_records` must be non-zero (`INVALID_ARGUMENT` otherwise). `timeout` is clamped to a floor of
 61ms and must not exceed 24h. Timeout expiry is a normal end of stream, not an error.
