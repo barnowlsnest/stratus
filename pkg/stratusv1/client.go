@@ -172,8 +172,8 @@ func (c *Client) GetStreamInfo(ctx context.Context) (StreamInfo, error) {
 	return fromProtoStreamInfo(resp.GetInfo()), nil
 }
 
-// Delete removes records with IDs up to and including endID, reporting the
-// deleted range and the range remaining in the stream.
+// Delete removes records with IDs less than endID, leaving the record at
+// endID in the stream, and reports the deleted and remaining ranges.
 func (c *Client) Delete(ctx context.Context, endID uint64) (DeleteResult, error) {
 	resp, err := c.svc.Delete(ctx, &pb.DeleteRequest{EndId: endID})
 	if err != nil {

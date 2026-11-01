@@ -66,7 +66,7 @@ The service is `stratus.v1.StreamService`, defined in [`proto/stratus/v1/stratus
 | `Add`            | unary         | Append a batch of records.                                      |
 | `ReadRange`      | unary         | Read the inclusive ID range `[start_id, end_id]`.               |
 | `ReadOffset`     | server stream | Read up to `max_records` from `start_id`, tailing for new ones. |
-| `Delete`         | unary         | Drop records up to and including `end_id`.                      |
+| `Delete`         | unary         | Drop records before `end_id`; the record at `end_id` stays.     |
 | `ReconcileCache` | unary         | Rebuild the in-memory cache from the WAL.                       |
 | `GetStreamInfo`  | unary         | Report the current range and record counts.                     |
 
@@ -101,18 +101,24 @@ timeout expires. Unlike `ReadRange`, it does not end at the current tail: when i
 blocks until `Add` produces more records, then keeps sending. Records already deleted from under
 the reader (`start_id` below the stream's first ID) end the stream with `OUT_OF_RANGE`.
 
+The stream stops once its next ID reaches `start_id + max_records - 1`, so every request sends at most `max_records - 1` records; a `max_records` of `1` sends nothing. If it catches up with the current tail before reaching that limit, it waits for new records until the timeout or limit. To receive exactly `n` while tailing, ask for `n + 1` and stop after `n`.
+
 `max_records` must be non-zero (`INVALID_ARGUMENT` otherwise). `timeout` is clamped to a floor of
 61ms and must not exceed 24h. Timeout expiry is a normal end of stream, not an error.
 
 ### Delete
 
-Removes records up to and including `end_id` and evicts them from the cache. Returns
-`deleted_records` and the remaining `stream_records`. An `end_id` of `0`, or one outside the
-current stream range, is `OUT_OF_RANGE`.
+Removes every record before `end_id` and evicts them from the cache. The record at `end_id` stays
+and becomes the stream's first record, so `Delete` cannot empty a stream. Returns `deleted_records`
+and the remaining `stream_records`. An `end_id` of `0`, or one outside the current stream range, is
+`OUT_OF_RANGE`. An `end_id` equal to the current first ID removes nothing and reports
+`deleted_records` as `0-0`.
+
+For example, on a stream of `1-20`, an `end_id` of `3` returns `deleted_records` `1-2` and
+`stream_records` `3-20`.
 
 Deletion truncates the WAL to `end_id` and then cuts it at that offset, so removal is exact rather
-than segment-granular: `deleted_records` is the range that is really gone, and nothing at the
-boundary stays readable afterwards.
+than segment-granular: `deleted_records` is the range that is really gone.
 
 ### ReconcileCache
 
@@ -185,7 +191,7 @@ Settings come from flags or environment variables of the same name (uppercased).
 | `cache_size`           | `4096`      | LRU capacity in records                                                                                                    |
 | `wal_batch_size`       | `16`        | WAL records per fsync batch                                                                                                |
 | `wal_max_segment_size` | `64MB`      | segment size before rotation                                                                                               |
-| `wal_max_record_size`  | `8MB`       | largest single record the WAL accepts                                                                                      |
+| `wal_max_record_size`  | `8MB`       | largest single record the WAL accepts; gRPC's default 4 MiB receive limit applies first, so `Add` rejects a 4 MiB record    |
 | `max_batch_read_size`  | `1024`      | **not wired up**: the storage read cap stays at its default of 64; it bounds single `Read` batches only, not cache warming |
 | `auth_token`           | —           | bearer token every RPC must carry; env `AUTH_TOKEN` only, no flag; optional                                                |
 | `tls_cert_file`        | —           | PEM certificate; enables TLS together with `tls_key_file`                                                                  |
