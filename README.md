@@ -11,6 +11,8 @@ Records are appended with a client-supplied dedup key, assigned a monotonic ID (
 and read back by ID — either as a bounded range or as a live tail that blocks until new records
 arrive. A LRU cache in front of the WAL serves recent reads without touching the filesystem.
 
+<img src="assets/architecture.svg" alt="Stratus architecture: clients call the stratus process over gRPC; inside it, cmd/app/server, internal/stream, internal/storage with internal/dedup, and go-wallib writing segments to WAL_DIR" width="720">
+
 ## Install
 
 The server and CLI ship as container images on GHCR, tagged by release:
@@ -56,6 +58,14 @@ it anywhere else.
   (`dedup_window`, default `1m`) causes the record to be dropped and counted as a duplicate.
 - **Stream range** — the inclusive `[start, end]` window of IDs currently in the WAL. `Delete`
   moves `start` forward; `Add` moves `end` forward.
+
+## How it works
+
+`Add` writes straight through to the WAL. A follower on the WAL then puts each new record into the
+LRU cache and wakes any `ReadOffset` tails waiting for more. `ReadRange` is served from the cache,
+and a cache miss falls back to reading that one record from the WAL.
+
+<img src="assets/internals.svg" alt="Record flow: Add goes through dedup to the WAL; a follower feeds the LRU and fires notify(), which wakes ReadOffset tails; ReadRange is served from the LRU, and a miss reads one record from the WAL; ReconcileCache clears the LRU and reloads it from the WAL" width="720">
 
 ## API
 

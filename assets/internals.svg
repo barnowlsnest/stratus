@@ -1,0 +1,234 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 610" width="1000" height="610" role="img" aria-labelledby="t d">
+  <title id="t">Stratus internals</title>
+  <desc id="d">A client calls the gRPC server. Add flows through stream and storage, is checked against the dedup window and appended to the WAL. A storage follower feeds each new record into the stream's LRU cache and fires notify, which wakes ReadOffset tails. ReadRange clamps the range in storage and is served from the LRU cache; a cache miss reads that one record from the WAL and caches it. ReconcileCache clears the LRU and reloads the whole WAL range into it.</desc>
+  <style>
+    .bg    { fill: #ffffff; stroke: #d0d7de; }
+    .box   { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1.5; }
+    .cell  { fill: #eaeef2; stroke: #d0d7de; }
+    .title { font: 700 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #1f2328; }
+    .head  { font: 700 22px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2328; }
+    .sub   { font: 14px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #59636e; }
+    .body  { font: 13px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #59636e; }
+    .tiny  { font: 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #59636e; }
+    .lane  { font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .add    { stroke: #d97706; fill: #d97706; }
+    .follow { stroke: #059669; fill: #059669; }
+    .tail   { stroke: #7c3aed; fill: #7c3aed; }
+    .range  { stroke: #2563eb; fill: #2563eb; }
+    .recon  { stroke: #db2777; fill: #db2777; }
+    .line  { fill: none; stroke-width: 2; stroke-opacity: 0.35; }
+    .dash  { fill: none; stroke-width: 1.5; stroke-dasharray: 4 4; stroke-opacity: 0.6; }
+    .txt   { stroke: none; }
+    @media (prefers-color-scheme: dark) {
+      .bg    { fill: #0d1117; stroke: #30363d; }
+      .box   { fill: #161b22; stroke: #30363d; }
+      .cell  { fill: #21262d; stroke: #30363d; }
+      .title, .head { fill: #e6edf3; }
+      .sub, .body, .tiny { fill: #9198a1; }
+      .add    { stroke: #f59e0b; fill: #f59e0b; }
+      .follow { stroke: #10b981; fill: #10b981; }
+      .tail   { stroke: #a78bfa; fill: #a78bfa; }
+      .range  { stroke: #60a5fa; fill: #60a5fa; }
+      .recon  { stroke: #f472b6; fill: #f472b6; }
+    }
+  </style>
+
+  <defs>
+    <marker id="m-add" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" class="add"/>
+    </marker>
+    <marker id="m-follow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" class="follow"/>
+    </marker>
+    <marker id="m-tail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" class="tail"/>
+    </marker>
+    <marker id="m-recon" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" class="recon"/>
+    </marker>
+    <marker id="m-range" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="range"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0.5" y="0.5" width="999" height="609" rx="12"/>
+
+  <text class="head" x="30" y="46">How a record moves</text>
+  <text class="sub" x="30" y="70">write path, cache follower, live tail, range reads and cache reconcile</text>
+
+  <!-- layers -->
+  <rect class="box" x="30" y="100" width="160" height="340" rx="8"/>
+  <text class="title" x="42" y="128">client</text>
+  <text class="body" x="42" y="150">stratuscli · --tui</text>
+  <text class="body" x="42" y="168">pkg/stratusv1</text>
+
+  <rect class="box" x="225" y="100" width="160" height="340" rx="8"/>
+  <text class="title" x="237" y="128">cmd/app/server</text>
+  <text class="body" x="237" y="150">gRPC StreamService</text>
+  <text class="body" x="237" y="168">auth · TLS</text>
+  <text class="body" x="237" y="186">toStatus() → codes</text>
+
+  <rect class="box" x="420" y="100" width="160" height="340" rx="8"/>
+  <text class="title" x="432" y="128">internal/stream</text>
+  <text class="body" x="432" y="150">LRU cache</text>
+  <text class="body" x="432" y="168">live-tail fan-out</text>
+
+  <rect class="box" x="615" y="100" width="160" height="340" rx="8"/>
+  <text class="title" x="627" y="128">internal/storage</text>
+  <text class="body" x="627" y="150">validate · clamp</text>
+  <text class="body" x="627" y="168">dedup on write</text>
+  <text class="body" x="627" y="186">Subscribe() follower</text>
+
+  <rect class="box" x="810" y="100" width="160" height="340" rx="8"/>
+  <text class="title" x="822" y="128">WAL · go-wallib</text>
+  <text class="body" x="822" y="150">segments in WAL_DIR</text>
+  <text class="body" x="822" y="168">record ID = LSN</text>
+
+  <rect class="box" x="615" y="458" width="160" height="56" rx="8"/>
+  <text class="title" x="627" y="481">internal/dedup</text>
+  <text class="body" x="627" y="501">keys in dedup_window</text>
+  <rect class="add" x="615" y="458" width="160" height="56" rx="8" fill-opacity="0.18" stroke-width="2" opacity="0">
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;0;1;0;0" keyTimes="0;0.24;0.27;0.42;1"/>
+  </rect>
+  <path class="add dash" d="M695,440 V458"/>
+
+  <!-- LRU cells -->
+  <g>
+    <rect class="cell" x="432" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="456" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="480" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="504" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="528" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="552" y="196" width="18" height="18" rx="3"/>
+    <rect class="range" x="528" y="196" width="18" height="18" rx="3" opacity="0">
+      <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+               values="0;0;1;0.25;0" keyTimes="0;0.39;0.41;0.5;1"/>
+    </rect>
+    <rect class="follow" x="552" y="196" width="18" height="18" rx="3" opacity="0">
+      <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+               values="0;0;1;0.25;0.25" keyTimes="0;0.56;0.58;0.9;1"/>
+    </rect>
+  </g>
+
+  <g>
+    <rect class="recon" x="430" y="194" width="142" height="22" rx="4" fill-opacity="0" stroke-width="2" opacity="0">
+      <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+               values="0;0;1;0;0;1;0;0" keyTimes="0;0.69;0.71;0.75;0.89;0.91;0.97;1"/>
+    </rect>
+  </g>
+
+  <!-- WAL cells -->
+  <g>
+    <rect class="cell" x="822" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="846" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="870" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="894" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="918" y="196" width="18" height="18" rx="3"/>
+    <rect class="cell" x="942" y="196" width="18" height="18" rx="3"/>
+    <text class="tiny" x="828" y="208">1</text>
+    <text class="tiny" x="852" y="208">2</text>
+    <text class="tiny" x="876" y="208">3</text>
+    <text class="tiny" x="900" y="208">4</text>
+    <text class="tiny" x="924" y="208">5</text>
+    <rect class="add" x="942" y="196" width="18" height="18" rx="3" opacity="0">
+      <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+               values="0;0;1;0.25;0.25" keyTimes="0;0.32;0.34;0.9;1"/>
+    </rect>
+    <text class="tiny" x="948" y="208">6</text>
+  </g>
+
+  <!-- lanes -->
+  <text class="lane add txt" x="42" y="220">Add</text>
+  <path class="add line" d="M150,228 H850" marker-end="url(#m-add)"/>
+
+  <text class="lane follow txt" x="822" y="250">follower</text>
+  <path class="follow line" d="M850,258 H500" marker-end="url(#m-follow)"/>
+  <path class="follow dash" d="M500,258 V288"/>
+  <text class="lane follow txt" x="508" y="277">notify()</text>
+
+  <text class="lane tail txt" x="42" y="280">ReadOffset</text>
+  <path class="tail line" d="M500,288 H150" marker-end="url(#m-tail)"/>
+
+  <text class="lane range txt" x="42" y="310">ReadRange</text>
+  <path class="range line" d="M150,318 H500" marker-start="url(#m-range)" marker-end="url(#m-range)"/>
+  <path class="range dash" d="M500,318 V348 H846" marker-end="url(#m-range)"/>
+  <text class="lane range txt" x="627" y="368">miss → Read(id, id)</text>
+
+  <text class="lane recon txt" x="42" y="384">ReconcileCache</text>
+  <path class="recon line" d="M150,392 H500" marker-end="url(#m-recon)"/>
+  <path class="recon dash" d="M846,412 H504" marker-end="url(#m-recon)"/>
+  <text class="lane recon txt" x="627" y="432">ReadEach(range)</text>
+
+  <!-- notify pulse -->
+  <circle class="follow" cx="500" cy="258" r="4" fill-opacity="0" stroke-width="2" opacity="0">
+    <animate attributeName="r" dur="6s" repeatCount="indefinite"
+             values="4;4;18;18" keyTimes="0;0.57;0.66;1"/>
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;0;0.9;0;0" keyTimes="0;0.565;0.575;0.66;1"/>
+  </circle>
+
+  <!-- moving records -->
+  <circle class="add" r="6" opacity="0">
+    <animateMotion dur="6s" repeatCount="indefinite" path="M150,228 H850"
+                   keyPoints="0;1;1" keyTimes="0;0.33;1" calcMode="linear"/>
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;1;1;0;0" keyTimes="0;0.02;0.31;0.34;1"/>
+  </circle>
+
+  <circle class="follow" r="6" opacity="0">
+    <animateMotion dur="6s" repeatCount="indefinite" path="M850,258 H500"
+                   keyPoints="0;0;1;1" keyTimes="0;0.35;0.57;1" calcMode="linear"/>
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;0;1;1;0;0" keyTimes="0;0.34;0.36;0.55;0.58;1"/>
+  </circle>
+
+  <circle class="tail" r="6" opacity="0">
+    <animateMotion dur="6s" repeatCount="indefinite" path="M500,288 H150"
+                   keyPoints="0;0;1;1" keyTimes="0;0.6;0.88;1" calcMode="linear"/>
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;0;1;1;0;0" keyTimes="0;0.59;0.61;0.86;0.89;1"/>
+  </circle>
+
+  <circle class="range" r="6" opacity="0">
+    <animateMotion dur="6s" repeatCount="indefinite" path="M150,318 H500"
+                   keyPoints="0;0;1;1;0;0" keyTimes="0;0.05;0.2;0.4;0.5;1" calcMode="linear"/>
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;0;1;1;0;0" keyTimes="0;0.04;0.06;0.49;0.51;1"/>
+  </circle>
+
+  <circle class="range" r="5" opacity="0">
+    <animateMotion dur="6s" repeatCount="indefinite" path="M500,318 V348 H846"
+                   keyPoints="0;0;1;0;0" keyTimes="0;0.2;0.3;0.4;1" calcMode="linear"/>
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;0;1;1;0;0" keyTimes="0;0.19;0.21;0.39;0.41;1"/>
+  </circle>
+
+  <circle class="recon" r="6" opacity="0">
+    <animateMotion dur="6s" repeatCount="indefinite" path="M150,392 H500"
+                   keyPoints="0;0;1;1" keyTimes="0;0.6;0.7;1" calcMode="linear"/>
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;0;1;1;0;0" keyTimes="0;0.59;0.61;0.69;0.71;1"/>
+  </circle>
+
+  <circle class="recon" r="5" opacity="0">
+    <animateMotion dur="6s" repeatCount="indefinite" path="M846,412 H504"
+                   keyPoints="0;0;1;1" keyTimes="0;0.75;0.9;1" calcMode="linear"/>
+    <animate attributeName="opacity" dur="6s" repeatCount="indefinite"
+             values="0;0;1;1;0;0" keyTimes="0;0.74;0.76;0.89;0.91;1"/>
+  </circle>
+
+  <!-- legend -->
+  <circle class="add" cx="38" cy="470" r="5"/>
+  <text class="body" x="52" y="474">Add — dedup check, then append; the WAL LSN becomes the record ID</text>
+  <circle class="follow" cx="38" cy="494" r="5"/>
+  <text class="body" x="52" y="498">follower — each new WAL record goes into the LRU, then notify()</text>
+  <circle class="tail" cx="38" cy="518" r="5"/>
+  <text class="body" x="52" y="522">ReadOffset — drains what exists, then waits on DataReady() for more</text>
+  <circle class="range" cx="38" cy="542" r="5"/>
+  <text class="body" x="52" y="546">ReadRange — clamped in storage, then served from the LRU</text>
+  <circle class="range" cx="38" cy="566" r="5" fill-opacity="0" stroke-width="2"/>
+  <text class="body" x="52" y="570">cache miss — reads that one record from the WAL and puts it in the LRU</text>
+  <circle class="recon" cx="38" cy="590" r="5"/>
+  <text class="body" x="52" y="594">ReconcileCache — clears the LRU, then reloads the whole WAL range into it</text>
+</svg>
