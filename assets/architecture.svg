@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 440" width="1000" height="440" role="img" aria-labelledby="t d">
+  <title id="t">Stratus architecture</title>
+  <desc id="d">Clients (stratuscli, the Go client, any gRPC client) call the stratus process over gRPC with optional TLS and bearer token. Inside the process the layers are cmd/app/server, internal/stream, internal/storage with internal/dedup, and go-wallib, which writes segment files to WAL_DIR.</desc>
+  <style>
+    .bg    { fill: #ffffff; stroke: #d0d7de; }
+    .box   { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1.5; }
+    .proc  { fill: none; stroke: #8c959f; stroke-width: 1.5; stroke-dasharray: 6 5; }
+    .title { font: 700 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #1f2328; }
+    .head  { font: 700 22px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2328; }
+    .sub   { font: 14px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #59636e; }
+    .body  { font: 13px system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #59636e; }
+    .tag   { font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #59636e; }
+    .link  { fill: none; stroke: #2563eb; stroke-width: 2; stroke-dasharray: 6 6; }
+    .call  { fill: none; stroke: #8c959f; stroke-width: 2; stroke-dasharray: 4 4; }
+    .disk  { fill: #fff8e6; stroke: #d97706; stroke-width: 1.5; }
+    .io    { fill: none; stroke: #d97706; stroke-width: 2; stroke-dasharray: 6 6; }
+    .ahead { fill: #2563eb; }
+    .acall { fill: #8c959f; }
+    .aio   { fill: #d97706; }
+    @media (prefers-color-scheme: dark) {
+      .bg    { fill: #0d1117; stroke: #30363d; }
+      .box   { fill: #161b22; stroke: #30363d; }
+      .proc  { stroke: #6e7681; }
+      .title, .head { fill: #e6edf3; }
+      .sub, .body, .tag { fill: #9198a1; }
+      .link  { stroke: #60a5fa; }
+      .ahead { fill: #60a5fa; }
+      .call  { stroke: #6e7681; }
+      .acall { fill: #6e7681; }
+      .disk  { fill: #2a1f0a; stroke: #f59e0b; }
+      .io    { stroke: #f59e0b; }
+      .aio   { fill: #f59e0b; }
+    }
+  </style>
+
+  <defs>
+    <marker id="a-link" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" class="ahead"/>
+    </marker>
+    <marker id="a-call" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" class="acall"/>
+    </marker>
+    <marker id="a-io" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="aio"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0.5" y="0.5" width="999" height="439" rx="12"/>
+
+  <text class="head" x="30" y="46">Stratus architecture</text>
+  <text class="sub" x="30" y="70">one gRPC service, strictly layered over an append-only write-ahead log</text>
+
+  <!-- clients -->
+  <rect class="box" x="30" y="110" width="180" height="70" rx="8"/>
+  <text class="title" x="44" y="138">stratuscli</text>
+  <text class="body" x="44" y="160">cobra commands · --tui</text>
+
+  <rect class="box" x="30" y="200" width="180" height="70" rx="8"/>
+  <text class="title" x="44" y="228">pkg/stratusv1</text>
+  <text class="body" x="44" y="250">Go client · own DTOs</text>
+
+  <rect class="box" x="30" y="290" width="180" height="70" rx="8"/>
+  <text class="title" x="44" y="318">any gRPC client</text>
+  <text class="body" x="44" y="340">proto/stratus/v1</text>
+
+  <!-- client links -->
+  <g>
+    <path class="link" d="M210,235 H250"/>
+    <path class="link" d="M210,325 H250 V146"/>
+    <path class="link" d="M210,146 H306" marker-end="url(#a-link)"/>
+    <animate attributeName="stroke-dashoffset" from="12" to="0" dur="0.8s" repeatCount="indefinite"/>
+  </g>
+  <text class="tag" x="30" y="384">gRPC · TLS · bearer token</text>
+
+  <!-- process -->
+  <rect class="proc" x="290" y="90" width="520" height="300" rx="10"/>
+  <text class="tag" x="306" y="110">stratus process</text>
+
+  <rect class="box" x="310" y="120" width="480" height="52" rx="6"/>
+  <text class="title" x="326" y="142">cmd/app/server</text>
+  <text class="body" x="326" y="161">gRPC handlers · auth &amp; TLS · timeout clamping · errors → codes</text>
+
+  <rect class="box" x="310" y="186" width="480" height="52" rx="6"/>
+  <text class="title" x="326" y="208">internal/stream</text>
+  <text class="body" x="326" y="227">LRU cache · lazy WAL load on miss · live-tail fan-out</text>
+
+  <rect class="box" x="310" y="252" width="310" height="52" rx="6"/>
+  <text class="title" x="326" y="274">internal/storage</text>
+  <text class="body" x="326" y="293">range checks · dedup on write · Subscribe()</text>
+
+  <rect class="box" x="640" y="252" width="150" height="52" rx="6"/>
+  <text class="title" x="654" y="274">internal/dedup</text>
+  <text class="body" x="654" y="293">dedup_window</text>
+
+  <rect class="box" x="310" y="318" width="480" height="52" rx="6"/>
+  <text class="title" x="326" y="340">go-wallib</text>
+  <text class="body" x="326" y="359">append · read · follow · truncate + cut offset</text>
+
+  <g>
+    <path class="call" d="M590,172 V184" marker-end="url(#a-call)"/>
+    <path class="call" d="M590,238 V250" marker-end="url(#a-call)"/>
+    <path class="call" d="M590,304 V316" marker-end="url(#a-call)"/>
+    <path class="call" d="M620,278 H638" marker-end="url(#a-call)"/>
+    <animate attributeName="stroke-dashoffset" from="8" to="0" dur="0.8s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- disk -->
+  <path class="io" d="M792,344 H846" marker-start="url(#a-io)" marker-end="url(#a-io)">
+    <animate attributeName="stroke-dashoffset" from="12" to="0" dur="0.8s" repeatCount="indefinite"/>
+  </path>
+  <path class="disk" d="M850,290 v100 a60,14 0 0 0 120,0 v-100"/>
+  <ellipse class="disk" cx="910" cy="290" rx="60" ry="14"/>
+  <text class="title" x="910" y="334" text-anchor="middle">WAL_DIR</text>
+  <text class="body" x="910" y="354" text-anchor="middle">segment files</text>
+
+  <text class="body" x="30" y="424">wired bottom-up in cmd/app/stratus.go · an errgroup runs signal handling, stream.Start and grpc.Serve</text>
+</svg>
