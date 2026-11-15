@@ -87,10 +87,11 @@ func (r *Record) validate() error {
 }
 
 // ClampRange resolves zero sentinels (from == first, to == last) and clamps an
-// overlapping range to the available window. A range that falls entirely
-// outside the window returns ErrOutOfBounds.
-func (s *Storage) ClampRange(fromID, toID uint64) (from, to uint64, err error) {
-	first, last := s.wal.FirstLSN(), s.wal.LastLSN()
+// overlapping range to the available window, which ends at the lower of the
+// WAL's last ID and ceiling. A range that falls entirely outside the window
+// returns ErrOutOfBounds.
+func (s *Storage) ClampRange(fromID, toID, ceiling uint64) (from, to uint64, err error) {
+	first, last := s.wal.FirstLSN(), min(s.wal.LastLSN(), ceiling)
 	if fromID == 0 {
 		fromID = first
 	}

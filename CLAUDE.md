@@ -46,8 +46,11 @@ the cache from the WAL range, then blocks forever consuming a `storage.Subscribe
 putting each new record into the LRU and firing `notify()`. Startup waits on `WaitForStart` before
 serving, so the cache is warm before the first RPC.
 
-Reads go through the cache: `Stream.Get` clamps the range in storage, then `lazyLoadRecord` serves
-each ID from the LRU and falls back to a single-record WAL read (caching the result) on a miss.
+Reads go through the cache: `Stream.Get` clamps the range in storage to the last ID the cache-fill
+loop has put into the LRU (`lastCached`), then `lazyLoadRecord` serves each ID from the LRU and
+falls back to a single-record WAL read (caching the result) only for evicted records. `Stream.Add`
+waits until `lastCached` reaches its last ID before returning, and reported stream ranges end at
+`lastCached`.
 `ReadOffset` is the live tail — the handler drains what exists and then waits on `Stream.DataReady()`
 (the channel `notify()` closes and replaces) for more.
 

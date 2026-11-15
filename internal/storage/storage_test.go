@@ -75,6 +75,42 @@ func (s *StorageSuite) TestReadEachUnbounded() {
 	}
 }
 
+// ClampRange never extends a range past the ceiling, even when the WAL holds more.
+func (s *StorageSuite) TestClampRangeCeiling() {
+	tests := []struct {
+		expectedErr  error
+		name         string
+		fromID       uint64
+		toID         uint64
+		ceiling      uint64
+		expectedFrom uint64
+		expectedTo   uint64
+	}{
+		{name: "ceiling above WAL end", fromID: 3, toID: 20, ceiling: 50, expectedFrom: 3, expectedTo: 10},
+		{name: "ceiling at WAL end", fromID: 3, toID: 20, ceiling: 10, expectedFrom: 3, expectedTo: 10},
+		{name: "ceiling inside range", fromID: 3, toID: 20, ceiling: 6, expectedFrom: 3, expectedTo: 6},
+		{name: "zero end resolves to ceiling", fromID: 0, toID: 0, ceiling: 6, expectedFrom: 1, expectedTo: 6},
+		{name: "range above ceiling", fromID: 7, toID: 9, ceiling: 6, expectedErr: storage.ErrOutOfBounds},
+		{name: "nothing below ceiling", fromID: 1, toID: 5, ceiling: 0, expectedErr: storage.ErrOutOfBounds},
+	}
+
+	st := s.newStorage(10)
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			actualFrom, actualTo, err := st.ClampRange(tc.fromID, tc.toID, tc.ceiling)
+			if tc.expectedErr != nil {
+				s.Require().ErrorIs(err, tc.expectedErr)
+
+				return
+			}
+
+			s.Require().NoError(err)
+			s.Equal(tc.expectedFrom, actualFrom)
+			s.Equal(tc.expectedTo, actualTo)
+		})
+	}
+}
+
 // The batch read cap still applies to Read.
 func (s *StorageSuite) TestReadStillCapped() {
 	st := s.newStorage(100)
