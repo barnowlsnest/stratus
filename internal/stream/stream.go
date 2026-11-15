@@ -26,9 +26,13 @@ type (
 		lru              *lru.LRU[storage.Record]
 		stop             context.CancelFunc
 		started          atomic.Bool
-		mu               sync.RWMutex
-		newDataReadySig  chan struct{}
-		startedChan      chan struct{}
+		// lastCached is the highest ID the cache-fill loop has put into the LRU.
+		// The loop receives IDs in order with no gaps, so every ID up to it has
+		// been cached; reads stop here so they never miss on a fresh record.
+		lastCached      atomic.Uint64
+		mu              sync.RWMutex
+		newDataReadySig chan struct{}
+		startedChan     chan struct{}
 	}
 
 	// Item is a single stream entry.
@@ -124,6 +128,7 @@ func (s *Stream) Start(ctx context.Context) error {
 			return err
 		}
 	}
+	s.lastCached.Store(last)
 
 	records, err := s.storage.Subscribe(pCtx, last, s.subscriberBuffer)
 	if err != nil {
@@ -136,6 +141,7 @@ func (s *Stream) Start(ctx context.Context) error {
 	s.started.Store(true)
 	for r := range records {
 		s.lru.Put(r.ID, r)
+		s.lastCached.Store(r.ID)
 		s.notify()
 	}
 
@@ -184,15 +190,14 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 		return AddResult{}, ErrAllSkipped
 	}
 
-	first, last := s.storage.Range()
+	addedLast := res.IDs[len(res.IDs)-1]
+	s.waitCached(ctx, addedLast)
+
 	result := AddResult{
-		StreamRange: Range{
-			first: first,
-			last:  last,
-		},
+		StreamRange: s.streamRange(),
 		AddedRange: Range{
 			first: res.IDs[0],
-			last:  res.IDs[len(res.IDs)-1],
+			last:  addedLast,
 		},
 		DedupCount: res.DuplicatesCount,
 	}
@@ -200,20 +205,47 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 	return result, nil
 }
 
+// waitCached blocks until the cache-fill loop has put id into the cache, ctx
+// ends, or the stream stops. The records are already durable in every case, so
+// giving up early is not an error: Add still reports what it wrote.
+func (s *Stream) waitCached(ctx context.Context, id uint64) {
+	for {
+		ready := s.DataReady()
+		if s.lastCached.Load() >= id || !s.IsStarted() {
+			return
+		}
+
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// streamRange is the range reads can return: from the WAL's first ID up to the
+// last ID in the cache.
+func (s *Stream) streamRange() Range {
+	first, _ := s.storage.Range()
+
+	return Range{first: first, last: s.lastCached.Load()}
+}
+
 func (s *Stream) Info() Info {
-	firstID, lastID := s.storage.Range()
+	firstID, walLastID := s.storage.Range()
+	visible := s.streamRange()
 	cacheEntriesCount := max(s.lru.Len(), 0)
 
 	return Info{
-		FirstID:       firstID,
-		LastID:        lastID,
-		FSRecords:     lastID - firstID + 1,
+		FirstID:       visible.first,
+		LastID:        visible.last,
+		FSRecords:     walLastID - firstID + 1,
 		CachedRecords: uint64(cacheEntriesCount),
 	}
 }
 
 func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error) {
-	first, last, err := s.storage.ClampRange(fromID, toID)
+	first, last, err := s.storage.ClampRange(fromID, toID, s.lastCached.Load())
 	if err != nil {
 		return nil, err
 	}
@@ -237,14 +269,14 @@ func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
 		return DelResult{}, err
 	}
 
-	newFirst, newLast := s.storage.Range()
+	newFirst, _ := s.storage.Range()
 	evictBelow := newFirst
 	if newFirst == 0 {
 		evictBelow = oldLast + 1
 	}
 
 	result := DelResult{
-		StreamRange: Range{first: newFirst, last: newLast},
+		StreamRange: s.streamRange(),
 	}
 	if evictBelow <= oldFirst {
 		return result, nil

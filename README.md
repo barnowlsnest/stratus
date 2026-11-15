@@ -56,16 +56,18 @@ it anywhere else.
   never a valid record ID and is used as a "not set" sentinel in requests.
 - **Dedup key** — a non-zero, client-generated `uint64`. A key seen again within the dedup window
   (`dedup_window`, default `1m`) causes the record to be dropped and counted as a duplicate.
-- **Stream range** — the inclusive `[start, end]` window of IDs currently in the WAL. `Delete`
-  moves `start` forward; `Add` moves `end` forward.
+- **Stream range** — the inclusive `[start, end]` window of IDs that can be read: from the WAL's
+  first ID to the last ID the cache has received. `Delete` moves `start` forward; `Add` moves `end`
+  forward.
 
 ## How it works
 
 `Add` writes straight through to the WAL. A follower on the WAL then puts each new record into the
-LRU cache and wakes any `ReadOffset` tails waiting for more. `ReadRange` is served from the cache,
-and a cache miss falls back to reading that one record from the WAL.
+LRU cache and wakes any `ReadOffset` tails waiting for more; `Add` returns once its records are in
+the cache. Reads never go past the last record the cache has received, so a fresh record is always
+served from the cache. A record that was evicted falls back to reading that one record from the WAL.
 
-<img src="assets/internals.svg" alt="Record flow: Add goes through dedup to the WAL; a follower feeds the LRU and fires notify(), which wakes ReadOffset tails; ReadRange is served from the LRU, and a miss reads one record from the WAL; ReconcileCache clears the LRU and reloads it from the WAL" width="720">
+<img src="assets/internals.svg" alt="Record flow: Add goes through dedup to the WAL and returns once a follower has fed its records into the LRU; the follower fires notify(), which wakes ReadOffset tails; ReadRange is served from the LRU, and a miss reads one record from the WAL; ReconcileCache clears the LRU and reloads it from the WAL" width="720">
 
 ## API
 
@@ -85,7 +87,9 @@ The service is `stratus.v1.StreamService`, defined in [`proto/stratus/v1/stratus
 Takes `repeated InputRecord records`, each with a non-zero `dedup_key` and non-empty `raw_data`.
 Returns `added_records` (the IDs assigned to records that were written), `stream_records` (the
 stream's range after the write), and `duplicate_records` (how many were dropped by the dedup
-window).
+window). `Add` returns once its records are in the cache, so they can be read as soon as it
+returns. If the caller's deadline expires or the server stops while `Add` waits for that, it still
+returns the normal result: the records are already in the WAL.
 
 An empty batch is `INVALID_ARGUMENT`. A batch where *every* record is a duplicate is
 `ALREADY_EXISTS` — no partial result is returned. A batch that is partially duplicate succeeds,

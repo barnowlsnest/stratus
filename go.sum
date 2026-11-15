@@ -14,8 +14,8 @@ github.com/barnowlsnest/go-datalib/v5 v5.4.1 h1:w0EL8jyBczds1LyqIQCTwFm29YJKtyh2
 github.com/barnowlsnest/go-datalib/v5 v5.4.1/go.mod h1:9NyiGvELT8aqg0oNMpagGw65SrrZQPhkESdvcyaQZdo=
 github.com/barnowlsnest/go-logslib/v2 v2.4.0 h1:QV6w/FEOsBM3ebtSsOfaM9Gd5yWwjh7g5+jXVhUiDI4=
 github.com/barnowlsnest/go-logslib/v2 v2.4.0/go.mod h1:vVIV3C1DK34moPOKmsVSAUsXd1lNC8JYmlrd350rawQ=
-github.com/barnowlsnest/go-wallib v1.5.1 h1:GP/xXGaFrrjLR7UQH57/s04yIhDBsN1rbScGnPZQ/tQ=
-github.com/barnowlsnest/go-wallib v1.5.1/go.mod h1:y74aguyfHZsB4kIUhe6GimETwNm7vSLNcejW6TOSsZA=
+github.com/barnowlsnest/go-wallib v1.5.2 h1:Ag/V+v5XGebanLVbv9KzWaEkwf7GdSXkO4TwWsBZJoU=
+github.com/barnowlsnest/go-wallib v1.5.2/go.mod h1:y74aguyfHZsB4kIUhe6GimETwNm7vSLNcejW6TOSsZA=
 github.com/charmbracelet/colorprofile v0.4.3 h1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex9t5KX76i20Q=
 github.com/charmbracelet/colorprofile v0.4.3/go.mod h1:/zT4BhpD5aGFpqQQqw7a+VtHCzu+zrQtt1zhMt9mR4Q=
 github.com/charmbracelet/ultraviolet v0.0.0-20261023060817-a45b7c86333f h1:D2JpB65eehsnkEwEG401dMBSNYtTDgvKXZZSl7ZCxWI=
