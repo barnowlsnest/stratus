@@ -140,8 +140,8 @@ func (s *Stream) Start(ctx context.Context) error {
 	s.mu.Unlock()
 	s.started.Store(true)
 	for r := range records {
-		s.lru.Put(r.ID, r)
-		s.lastCached.Store(r.ID)
+		s.cacheRecord(r)
+		s.cacheWaiting(records)
 		s.notify()
 	}
 
@@ -203,6 +203,31 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 	}
 
 	return result, nil
+}
+
+// cacheRecord puts one record from the cache-fill loop into the LRU and moves
+// lastCached up to it.
+func (s *Stream) cacheRecord(r *storage.Record) {
+	s.lru.Put(r.ID, r)
+	s.lastCached.Store(r.ID)
+}
+
+// cacheWaiting caches every record already waiting in records without blocking,
+// so one notify covers the whole batch. Every notify wakes every ReadOffset tail
+// and each wake becomes one gRPC message per tail, so with many tails one notify
+// per record made socket writes and the notify lock the bottleneck.
+func (s *Stream) cacheWaiting(records <-chan *storage.Record) {
+	for {
+		select {
+		case r, ok := <-records:
+			if !ok {
+				return
+			}
+			s.cacheRecord(r)
+		default:
+			return
+		}
+	}
 }
 
 // waitCached blocks until the cache-fill loop has put id into the cache, ctx

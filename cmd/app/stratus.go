@@ -63,7 +63,7 @@ func run() error {
 		return err
 	}
 
-	walStream, err := newStream(walStorage, lru.New[storage.Record](appCfg.CacheSize))
+	walStream, err := newStream(walStorage, lru.New[storage.Record](appCfg.CacheSize), appCfg.SubscriberBuffer)
 	if err != nil {
 		return err
 	}
@@ -189,10 +189,10 @@ func newStorage(w *wal.WAL, d *dedup.Deduplicator) (*storage.Storage, error) {
 	)
 }
 
-func newStream(s *storage.Storage, cache *lru.LRU[storage.Record]) (*stream.Stream, error) {
+func newStream(s *storage.Storage, cache *lru.LRU[storage.Record], subscriberBuffer int) (*stream.Stream, error) {
 	return stream.New(
 		stream.WithStorage(s),
 		stream.WithCache(cache),
-		stream.WithSubscriberBuffer(1),
+		stream.WithSubscriberBuffer(subscriberBuffer),
 	)
 }

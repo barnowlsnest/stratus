@@ -16,6 +16,9 @@ const (
 	DefaultWALMaxSegmentSize = 64 << 20 // 64MB
 	// DefaultWALMaxRecordSize is the largest single record the wal accepts.
 	DefaultWALMaxRecordSize = 8 << 20 // 8MB
+	// DefaultSubscriberBuffer is how many records the WAL follower can queue for
+	// the cache-fill loop, which caches all of them before waking tails once.
+	DefaultSubscriberBuffer = 1024
 )
 
 type Config struct {
@@ -26,6 +29,7 @@ type Config struct {
 	WALMaxSegmentSize int64         `name:"wal_max_segment_size" usage:"maximum wal segment size in bytes before rotation"`
 	MaxBatchReadSize  int           `name:"max_batch_read_size" default:"1024" usage:"maximum number of records to read in a single batch"`
 	CacheSize         int           `name:"cache_size" default:"4096" usage:"preloader LRU capacity"`
+	SubscriberBuffer  int           `name:"subscriber_buffer" default:"1024" usage:"records the wal follower can queue for the cache"`
 	Port              int           `name:"port" default:"8000" usage:"port to listen on"`
 	WALBatchSize      int           `name:"wal_batch_size" usage:"number of wal records per fsync batch"`
 	WALMaxRecordSize  int           `name:"wal_max_record_size" usage:"maximum wal record size in bytes"`
@@ -57,17 +61,26 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	if cfg.WALBatchSize <= 0 {
-		cfg.WALBatchSize = DefaultWALBatchSize
-	}
-
-	if cfg.WALMaxSegmentSize <= 0 {
-		cfg.WALMaxSegmentSize = DefaultWALMaxSegmentSize
-	}
-
-	if cfg.WALMaxRecordSize <= 0 {
-		cfg.WALMaxRecordSize = DefaultWALMaxRecordSize
-	}
+	cfg.applyDefaults()
 
 	return &cfg, nil
+}
+
+// applyDefaults replaces unset or non-positive sizes with their defaults.
+func (c *Config) applyDefaults() {
+	if c.WALBatchSize <= 0 {
+		c.WALBatchSize = DefaultWALBatchSize
+	}
+
+	if c.WALMaxSegmentSize <= 0 {
+		c.WALMaxSegmentSize = DefaultWALMaxSegmentSize
+	}
+
+	if c.WALMaxRecordSize <= 0 {
+		c.WALMaxRecordSize = DefaultWALMaxRecordSize
+	}
+
+	if c.SubscriberBuffer <= 0 {
+		c.SubscriberBuffer = DefaultSubscriberBuffer
+	}
 }

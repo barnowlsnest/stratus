@@ -64,7 +64,8 @@ it anywhere else.
 
 `Add` writes straight through to the WAL. A follower on the WAL then puts each new record into the
 LRU cache and wakes any `ReadOffset` tails waiting for more; `Add` returns once its records are in
-the cache. Reads never go past the last record the cache has received, so a fresh record is always
+the cache. It caches every record already waiting (up to `subscriber_buffer`) before it wakes the
+tails, so each tail sends them as one message instead of one message per record. Reads never go past the last record the cache has received, so a fresh record is always
 served from the cache. A record that was evicted falls back to reading that one record from the WAL.
 
 <img src="assets/internals.svg" alt="Record flow: Add goes through dedup to the WAL and returns once a follower has fed its records into the LRU; the follower fires notify(), which wakes ReadOffset tails; ReadRange is served from the LRU, and a miss reads one record from the WAL; ReconcileCache clears the LRU and reloads it from the WAL" width="720">
@@ -203,6 +204,7 @@ Settings come from flags or environment variables of the same name (uppercased).
 | `log_level`            | `info`      | log level                                                                                                                  |
 | `dedup_window`         | `1m`        | how long a dedup key is remembered                                                                                         |
 | `cache_size`           | `4096`      | LRU capacity in records                                                                                                    |
+| `subscriber_buffer`    | `1024`      | records the WAL follower can queue for the cache; each holds a copy of its payload                                         |
 | `wal_batch_size`       | `16`        | WAL records per fsync batch                                                                                                |
 | `wal_max_segment_size` | `64MB`      | segment size before rotation                                                                                               |
 | `wal_max_record_size`  | `8MB`       | largest single record the WAL accepts; gRPC's default 4 MiB receive limit applies first, so `Add` rejects a 4 MiB record    |
