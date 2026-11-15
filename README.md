@@ -70,6 +70,12 @@ served from the cache. A record that was evicted falls back to reading that one 
 
 <img src="assets/internals.svg" alt="Record flow: Add goes through dedup to the WAL and returns once a follower has fed its records into the LRU; the follower fires notify(), which wakes ReadOffset tails; ReadRange is served from the LRU, and a miss reads one record from the WAL; ReconcileCache clears the LRU and reloads it from the WAL" width="720">
 
+## Performance
+
+On a 10-core laptop, one server handled about 3k single-record writes/s (121k records/s in
+batches of 100), 1.6M cached records/s read, and 1,024 live tails that kept up with writes. See
+[docs/performance.md](docs/performance.md) for throughput, sizing, limits and scaling.
+
 ## API
 
 The service is `stratus.v1.StreamService`, defined in [`proto/stratus/v1/stratus.proto`](proto/stratus/v1/stratus.proto).
