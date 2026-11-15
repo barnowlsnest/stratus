@@ -48,3 +48,47 @@ func (s *ConfigSuite) TestValidate() {
 		})
 	}
 }
+
+// Unset or non-positive sizes fall back to their defaults; set values are kept.
+func (s *ConfigSuite) TestApplyDefaults() {
+	cases := []struct {
+		name     string
+		cfg      Config
+		expected Config
+	}{
+		{
+			name: "unset",
+			cfg:  Config{},
+			expected: Config{
+				WALBatchSize:      DefaultWALBatchSize,
+				WALMaxSegmentSize: DefaultWALMaxSegmentSize,
+				WALMaxRecordSize:  DefaultWALMaxRecordSize,
+				SubscriberBuffer:  DefaultSubscriberBuffer,
+			},
+		},
+		{
+			name: "negative",
+			cfg:  Config{WALBatchSize: -1, WALMaxSegmentSize: -1, WALMaxRecordSize: -1, SubscriberBuffer: -1},
+			expected: Config{
+				WALBatchSize:      DefaultWALBatchSize,
+				WALMaxSegmentSize: DefaultWALMaxSegmentSize,
+				WALMaxRecordSize:  DefaultWALMaxRecordSize,
+				SubscriberBuffer:  DefaultSubscriberBuffer,
+			},
+		},
+		{
+			name:     "set",
+			cfg:      Config{WALBatchSize: 4, WALMaxSegmentSize: 1 << 20, WALMaxRecordSize: 1 << 10, SubscriberBuffer: 64},
+			expected: Config{WALBatchSize: 4, WALMaxSegmentSize: 1 << 20, WALMaxRecordSize: 1 << 10, SubscriberBuffer: 64},
+		},
+	}
+
+	for i := range cases {
+		tc := &cases[i]
+		s.Run(tc.name, func() {
+			actual := tc.cfg
+			actual.applyDefaults()
+			s.Equal(tc.expected, actual)
+		})
+	}
+}

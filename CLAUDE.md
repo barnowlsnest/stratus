@@ -42,8 +42,11 @@ internal/dedup   time-windowed dedup-key set
 
 `cmd/app/stratus.go` wires them bottom-up (wal → storage+dedup → stream+lru → grpc server) and runs
 three errgroup goroutines: signal handling, `stream.Start`, and `grpc.Serve`. `stream.Start` preloads
-the cache from the WAL range, then blocks forever consuming a `storage.Subscribe` follower channel,
-putting each new record into the LRU and firing `notify()`. Startup waits on `WaitForStart` before
+the cache from the WAL range, then blocks forever consuming a `storage.Subscribe` follower channel
+(buffered by `subscriber_buffer`, default 1024). It puts every record already waiting into the LRU
+and then fires one `notify()`, so each `ReadOffset` tail wakes to a batch and sends it as one
+message; a `notify()` per record made gRPC socket writes and the notify lock the bottleneck with
+many tails. Startup waits on `WaitForStart` before
 serving, so the cache is warm before the first RPC.
 
 Reads go through the cache: `Stream.Get` clamps the range in storage to the last ID the cache-fill
