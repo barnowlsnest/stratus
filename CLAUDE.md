@@ -51,9 +51,9 @@ many tails. Startup waits on `WaitForStart` before
 serving, so the cache is warm before the first RPC.
 
 Reads go through the cache: `Stream.Get` clamps the range in storage to the last ID the cache-fill
-loop has put into the LRU (`lastCached`), then serves each ID from the LRU; at the first evicted ID
-it reads the rest of the range from the WAL in one pass and caches every record (a WAL reader scans
-its segment from the start, so per-record reads cost one segment scan each). `Stream.Add`
+loop has put into the LRU (`lastCached`), then takes the range from the LRU in one `GetRange`
+lookup (one lock per read, not per ID); from the first evicted ID it reads the rest of the range
+from the WAL in one pass and caches every record. `Stream.Add`
 waits until `lastCached` reaches its last ID before returning, and reported stream ranges end at
 `lastCached`.
 `ReadOffset` is the live tail — the handler drains what exists and then waits on `Stream.DataReady()`

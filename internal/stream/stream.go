@@ -287,23 +287,20 @@ func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Recor
 		return nil, err
 	}
 
-	records := make([]*storage.Record, 0, last-first+1)
-	for id := first; id <= last; id++ {
-		r, err := s.lru.Get(id)
-		switch {
-		case err == nil:
-			records = append(records, r)
-		case errors.Is(err, lru.ErrCacheMiss):
-			// Each WAL reader scans its segment from the start, so reading the
-			// misses one ID at a time cost one segment scan per record. Read the
-			// rest of the range in a single pass instead.
-			return s.readAndCacheRange(ctx, records, id, last)
-		default:
-			return nil, err
-		}
+	// One range lookup takes the cache lock once per read. A lookup per ID took
+	// it once per record, and with many tails waking on the same batch the lock
+	// was the main CPU cost.
+	records, err := s.lru.GetRange(first, last, make([]*storage.Record, 0, last-first+1))
+	switch {
+	case err == nil:
+		return records, nil
+	case errors.Is(err, lru.ErrCacheMiss):
+		// Read the rest of the range from the first miss with one WAL reader,
+		// which costs one open and one index lookup instead of one per record.
+		return s.readAndCacheRange(ctx, records, first+uint64(len(records)), last)
+	default:
+		return nil, err
 	}
-
-	return records, nil
 }
 
 func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
