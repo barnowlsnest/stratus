@@ -66,67 +66,23 @@ it anywhere else.
 LRU cache and wakes any `ReadOffset` tails waiting for more; `Add` returns once its records are in
 the cache. It caches every record already waiting (up to `subscriber_buffer`) before it wakes the
 tails, so each tail sends them as one message instead of one message per record. Reads never go past the last record the cache has received, so a fresh record is always
-served from the cache. A record that was evicted falls back to reading that one record from the WAL.
+served from the cache. At the first evicted record, the rest of the range is read from the WAL in one
+pass and cached.
 
-<img src="assets/internals.svg" alt="Record flow: Add goes through dedup to the WAL and returns once a follower has fed its records into the LRU; the follower fires notify(), which wakes ReadOffset tails; ReadRange is served from the LRU, and a miss reads one record from the WAL; ReconcileCache clears the LRU and reloads it from the WAL" width="720">
+<img src="assets/internals.svg" alt="Record flow: Add goes through dedup to the WAL and returns once a follower has fed its records into the LRU; the follower fires notify(), which wakes ReadOffset tails; ReadRange is served from the LRU, and from the first miss the rest of the range is read from the WAL in one pass; ReconcileCache clears the LRU and reloads the newest cache_size records from the WAL" width="720">
 
 ## Performance
 
-Measured on one machine with stratus `cfb3634` (go-wallib v1.5.2) and the default configuration:
-Apple M1 Max (10 cores), 64 GB RAM, macOS, local SSD. Records are 1 KiB unless noted, and each run
-lasts 15–20 s. The load generator ran on the same machine and used up to about 2 cores, so treat
-the numbers as a guide. A Linux server with a different disk will differ, especially for writes,
-which are bound by fsync.
-
-CPU is in cores (100% = one core). RSS is the server's peak resident memory.
-
-### Throughput
-
-| Load                                                       | CPU  | RSS    | Throughput                                       |
-|------------------------------------------------------------|------|--------|--------------------------------------------------|
-| Idle, empty WAL                                            | 0%   | 15 MB  | —                                                |
-| Writes, 1 client, 1 record per `Add`                       | 10%  | 160 MB | 126 records/s                                    |
-| Writes, 16 clients, 1 record per `Add`                     | 49%  | 165 MB | 2,177 records/s                                  |
-| Writes, 64 clients, 1 record per `Add`                     | 58%  | 167 MB | 2,923 records/s                                  |
-| Writes, 16 clients, 100 records per `Add`                  | 107% | 606 MB | 80,200 records/s                                 |
-| Writes, 64 clients, 100 records per `Add`                  | 187% | 856 MB | 121,300 records/s                                |
-| Writes, 16 clients, 10 × 64 KiB records per `Add`          | 106% | 792 MB | 5,864 records/s (375 MB/s)                       |
-| Reads in the cache, 16 clients, 64 records per `ReadRange` | 376% | 241 MB | 1.27M records/s (19.8k requests/s)               |
-| Reads in the cache, 64 clients                             | 389% | 286 MB | 1.60M records/s (24.9k requests/s)               |
-| Reads outside the cache, 16 clients, 1.5 GB WAL            | 943% | 716 MB | 132 records/s                                    |
-| 256 tails + 16 writers                                     | 129% | 186 MB | 2,109 writes/s, 540k records/s out               |
-| 512 tails + 16 writers                                     | 185% | 239 MB | 1,788 writes/s, 916k records/s out               |
-| 1,024 tails + 16 writers                                   | 237% | 272 MB | 1,209 writes/s, 1.24M records/s out              |
-| Mixed: 32 writers, 16 readers, 256 tails                   | 325% | 891 MB | 9.7k writes/s, 219k reads/s, 2.49M records/s out |
-
-The tails are `ReadOffset` streams spread over 8 client connections. Every tail kept up with the
-write rate.
-
-### What one core handles
-
-These are estimates from the measured cost per operation. One core (100% CPU) handles about:
-
-- **3,000 single-record `Add` calls/s**, or **75,000 records/s** when each `Add` carries about 100
-  records.
-- **330,000 records/s read from the cache**, which is about 5,000 `ReadRange` calls of 64 records.
-- **Tail fan-out costs about 1.5 µs per record delivered to each tail.** For example, 2,000 writes/s
-  with 150 tails fits in one core.
-- **Reads outside the cache are not covered:** 16 such readers used 9 cores for 132 records/s.
+CPU and memory depend on record size, batch size, how many tails are open and how much of the
+reading stays inside the cache. Writes are bound by fsync, so the disk matters most for them.
 
 ### Sizing one server
 
-| Workload                                                     | Cores | RAM    |
-|--------------------------------------------------------------|-------|--------|
-| Up to 3k writes/s, up to 150 tails, reads within the cache   | 1     | 512 MB |
-| Up to 50k records/s in batches, up to 500 tails, cache reads | 2–4   | 2 GB   |
-| 100k+ records/s in batches, about 1,000 tails, mixed load    | 4+    | 4 GB   |
-
 RAM is mostly made of three parts:
 
-- **Cache:** `cache_size` × record size, which is 4 MB at the defaults with 1 KiB records and
-  256 MB with 64 KiB records.
-- **Dedup keys:** about 100 B per key, and every record's key is kept for `dedup_window` (default
-  1 min). 100k records/s keeps about 6M keys, or roughly 600 MB.
+- **Cache:** `cache_size` × record size.
+- **Dedup keys:** every record's key is kept for `dedup_window` (default 1 min), so the key set
+  grows with the write rate.
 - **Follower queue:** up to `subscriber_buffer` (default 1024) waiting records, each with a copy of
   its payload.
 
@@ -139,14 +95,14 @@ memory you give the server.
 - **Record and response size.** gRPC's default 4 MiB receive limit caps a single `Add`, and also any
   `ReadRange` response that a default client receives. For example, 64 records of 64 KiB fail with
   `RESOURCE_EXHAUSTED`.
-- **Writes are fsynced before `Add` returns.** Group commits hold up to `wal_batch_size` requests.
-  One client doing single-record `Add` calls gets about 126 writes/s here, so batch records.
+- **Writes are fsynced before `Add` returns.** Group commits hold up to `wal_batch_size` requests,
+  so a client doing single-record `Add` calls is bound by fsync latency. Batch records.
 - **`Add` returns once its records are in the cache**, so they are readable as soon as it returns.
-- **Reads outside the cache are slow.** Each record outside the LRU is read by scanning its WAL
-  segment (up to `wal_max_segment_size`, default 64 MB) from the start. Size `cache_size` to cover
-  how far behind readers and tails can fall.
-- **Startup reads the whole WAL** to warm the cache: about 5 s for 7.2 GB here, with the files
-  already in the OS page cache.
+- **Reads outside the cache are slow.** A WAL reader scans its segment (up to
+  `wal_max_segment_size`, default 64 MB) from the start, so a read that misses the LRU costs at least
+  one segment scan. Size `cache_size` to cover how far behind readers and tails can fall.
+- **Startup reads the newest `cache_size` records** of the WAL to warm the cache; with a
+  `cache_size` of 0 it reads the whole WAL.
 - **`ReadOffset`** sends at most `max_records` − 1 records per request, and its timeout must be
   between 61 ms and 24 h.
 - **`Delete` cannot empty the stream:** the record at `end_id` stays.
@@ -156,9 +112,10 @@ memory you give the server.
 
 Client side, which gives the biggest gains:
 
-1. **Batch records in each `Add`.** At 100 records per call, throughput rises about 30× per client.
-2. **Share connections.** Run many `ReadOffset` streams over a few connections per client process
-   (8 worked well). One connection per stream roughly doubles the server's CPU per record.
+1. **Batch records in each `Add`.** Each call pays one fsync, so more records per call means more
+   records per second.
+2. **Share connections.** Run many `ReadOffset` streams over a few connections per client process.
+   One connection per stream costs the server noticeably more CPU per record.
 3. **Keep reads inside the cache.** Raise `cache_size` instead of reading old ranges.
 
 Server side:
@@ -207,7 +164,7 @@ first / last ID", so `{}` reads the whole stream.
 
 The range is clamped to the stream's window: a range that overlaps the window is trimmed to it,
 while a range entirely outside it is `OUT_OF_RANGE`. Records are served from the LRU cache,
-falling back to a single-record WAL read (and caching the result) on a miss, so there is no
+and from the first miss the rest of the range is read from the WAL in one pass and cached, so there is no
 fixed per-request record cap.
 
 `timeout` bounds the read on the server side; when unset or non-positive, the read is bounded
@@ -243,8 +200,8 @@ than segment-granular: `deleted_records` is the range that is really gone.
 
 Clears the cache and reloads it from the WAL over the stream's current range, then returns that
 range. Useful after a `Delete` or when the cache has been churned by cold reads. The reload
-streams the whole range record by record, so it is not bounded by the read cap; the LRU keeps the
-newest `cache_size` entries. The startup preload works the same way.
+reads only the newest `cache_size` records of the range (the whole range when `cache_size` is 0),
+in one pass. The startup preload works the same way.
 
 ### GetStreamInfo
 

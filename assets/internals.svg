@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 610" width="1000" height="610" role="img" aria-labelledby="t d">
   <title id="t">Stratus internals</title>
-  <desc id="d">A client calls the gRPC server. Add flows through stream and storage, is checked against the dedup window and appended to the WAL. A storage follower feeds each new record into the stream's LRU cache and fires notify, which wakes ReadOffset tails. ReadRange clamps the range in storage and is served from the LRU cache; a cache miss reads that one record from the WAL and caches it. ReconcileCache clears the LRU and reloads the whole WAL range into it.</desc>
+  <desc id="d">A client calls the gRPC server. Add flows through stream and storage, is checked against the dedup window and appended to the WAL. A storage follower feeds every waiting record into the stream's LRU cache and then fires one notify, which wakes ReadOffset tails. ReadRange clamps the range in storage and is served from the LRU cache; from the first cache miss, the rest of the range is read from the WAL in one pass and cached. ReconcileCache clears the LRU and reloads the newest cache_size records into it.</desc>
   <style>
     .bg    { fill: #ffffff; stroke: #d0d7de; }
     .box   { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1.5; }
@@ -153,7 +153,7 @@
   <text class="lane range txt" x="42" y="310">ReadRange</text>
   <path class="range line" d="M150,318 H500" marker-start="url(#m-range)" marker-end="url(#m-range)"/>
   <path class="range dash" d="M500,318 V348 H846" marker-end="url(#m-range)"/>
-  <text class="lane range txt" x="627" y="368">miss → Read(id, id)</text>
+  <text class="lane range txt" x="627" y="368">miss → ReadEach(id, end)</text>
 
   <text class="lane recon txt" x="42" y="384">ReconcileCache</text>
   <path class="recon line" d="M150,392 H500" marker-end="url(#m-recon)"/>
@@ -222,13 +222,13 @@
   <circle class="add" cx="38" cy="470" r="5"/>
   <text class="body" x="52" y="474">Add — dedup check, then append; the WAL LSN becomes the record ID</text>
   <circle class="follow" cx="38" cy="494" r="5"/>
-  <text class="body" x="52" y="498">follower — each new WAL record goes into the LRU, then notify()</text>
+  <text class="body" x="52" y="498">follower — waiting WAL records go into the LRU, then one notify()</text>
   <circle class="tail" cx="38" cy="518" r="5"/>
   <text class="body" x="52" y="522">ReadOffset — drains what exists, then waits on DataReady() for more</text>
   <circle class="range" cx="38" cy="542" r="5"/>
   <text class="body" x="52" y="546">ReadRange — clamped in storage, then served from the LRU</text>
   <circle class="range" cx="38" cy="566" r="5" fill-opacity="0" stroke-width="2"/>
-  <text class="body" x="52" y="570">cache miss — reads that one record from the WAL and puts it in the LRU</text>
+  <text class="body" x="52" y="570">cache miss — reads the rest of the range in one pass, caches it all</text>
   <circle class="recon" cx="38" cy="590" r="5"/>
-  <text class="body" x="52" y="594">ReconcileCache — clears the LRU, then reloads the whole WAL range into it</text>
+  <text class="body" x="52" y="594">ReconcileCache — clears the LRU, then reloads the newest cache_size records</text>
 </svg>
