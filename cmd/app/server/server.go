@@ -27,6 +27,7 @@ type (
 		Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error)
 		Del(ctx context.Context, upTo uint64) (stream.DelResult, error)
 		Info() stream.Info
+		FirstID() uint64
 		DataReady() <-chan struct{}
 		ReconcileCache(ctx context.Context) error
 	}
@@ -97,8 +98,8 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 			return nil
 		}
 
-		i := s.stream.Info()
-		if i.FirstID > 0 && nextID < i.FirstID {
+		firstID := s.stream.FirstID()
+		if firstID > 0 && nextID < firstID {
 			return toStatus(storage.ErrOutOfBounds)
 		}
 
@@ -108,7 +109,7 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			return nil
 		case errors.Is(err, storage.ErrOutOfBounds):
-			if i.FirstID > 0 && nextID < i.FirstID {
+			if firstID > 0 && nextID < firstID {
 				return toStatus(err)
 			}
 		case err != nil:

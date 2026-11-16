@@ -93,6 +93,8 @@ func (fakeStream) Del(context.Context, uint64) (stream.DelResult, error) {
 
 func (fakeStream) Info() stream.Info { return stream.Info{FirstID: 1, LastID: 3} }
 
+func (fakeStream) FirstID() uint64 { return 1 }
+
 func (fakeStream) DataReady() <-chan struct{} { return make(chan struct{}) }
 
 func (fakeStream) ReconcileCache(context.Context) error { return nil }

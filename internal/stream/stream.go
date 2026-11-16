@@ -268,6 +268,15 @@ func (s *Stream) streamRange() Range {
 	return Range{first: first, last: s.lastCached.Load()}
 }
 
+// FirstID is the first ID reads can return. It skips the cache lock that Info
+// takes to count entries, so ReadOffset can check it on every loop: with many
+// tails that count was a bigger CPU cost than the cache read itself.
+func (s *Stream) FirstID() uint64 {
+	first, _ := s.storage.Range()
+
+	return first
+}
+
 func (s *Stream) Info() Info {
 	firstID, walLastID := s.storage.Range()
 	visible := s.streamRange()
