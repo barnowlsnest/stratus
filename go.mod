@@ -9,7 +9,7 @@ require (
 	github.com/barnowlsnest/go-configlib/v2 v2.2.0
 	github.com/barnowlsnest/go-datalib/v5 v5.5.0
 	github.com/barnowlsnest/go-logslib/v2 v2.4.0
-	github.com/barnowlsnest/go-wallib v1.6.0
+	github.com/barnowlsnest/go-wallib v1.7.0
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/spf13/cobra v1.10.2

@@ -98,9 +98,10 @@ memory you give the server.
 - **Writes are fsynced before `Add` returns.** Group commits hold up to `wal_batch_size` requests,
   so a client doing single-record `Add` calls is bound by fsync latency. Batch records.
 - **`Add` returns once its records are in the cache**, so they are readable as soon as it returns.
-- **Reads outside the cache are slow.** A WAL reader scans its segment (up to
-  `wal_max_segment_size`, default 64 MB) from the start, so a read that misses the LRU costs at least
-  one segment scan. Size `cache_size` to cover how far behind readers and tails can fall.
+- **Reads outside the cache go to the WAL.** A WAL reader starts near the requested ID through the
+  WAL's in-memory segment index, so a read that misses the LRU reads from disk instead of memory
+  but does not scan the whole segment. Size `cache_size` to cover how far behind readers and tails
+  can fall.
 - **Startup reads the newest `cache_size` records** of the WAL to warm the cache; with a
   `cache_size` of 0 it reads the whole WAL.
 - **`ReadOffset`** sends at most `max_records` − 1 records per request, and its timeout must be

@@ -295,9 +295,8 @@ func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Recor
 	case err == nil:
 		return records, nil
 	case errors.Is(err, lru.ErrCacheMiss):
-		// Each WAL reader scans its segment from the start, so reading the
-		// misses one ID at a time cost one segment scan per record. Read the
-		// rest of the range from the first miss in a single pass instead.
+		// Read the rest of the range from the first miss with one WAL reader,
+		// which costs one open and one index lookup instead of one per record.
 		return s.readAndCacheRange(ctx, records, first+uint64(len(records)), last)
 	default:
 		return nil, err
