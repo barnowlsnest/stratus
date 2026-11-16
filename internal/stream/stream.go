@@ -22,10 +22,13 @@ type (
 
 	Stream struct {
 		subscriberBuffer int
-		storage          *storage.Storage
-		lru              *lru.LRU[storage.Record]
-		stop             context.CancelFunc
-		started          atomic.Bool
+		// cacheSize is how many of the newest records Start and ReconcileCache
+		// load. Zero loads the whole WAL range.
+		cacheSize int
+		storage   *storage.Storage
+		lru       *lru.LRU[storage.Record]
+		stop      context.CancelFunc
+		started   atomic.Bool
 		// lastCached is the highest ID the cache-fill loop has put into the LRU.
 		// The loop receives IDs in order with no gaps, so every ID up to it has
 		// been cached; reads stop here so they never miss on a fresh record.
@@ -88,6 +91,15 @@ func WithCache(cache *lru.LRU[storage.Record]) Option {
 func WithSubscriberBuffer(buffer int) Option {
 	return func(s *Stream) {
 		s.subscriberBuffer = buffer
+	}
+}
+
+// WithCacheSize sets how many of the newest records Start and ReconcileCache
+// load into the cache. Pass the LRU's capacity: older records would only be
+// evicted again by the newer ones. Zero or less loads the whole WAL range.
+func WithCacheSize(size int) Option {
+	return func(s *Stream) {
+		s.cacheSize = size
 	}
 }
 
@@ -277,12 +289,18 @@ func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Recor
 
 	records := make([]*storage.Record, 0, last-first+1)
 	for id := first; id <= last; id++ {
-		r, err := s.lazyLoadRecord(ctx, id)
-		if err != nil {
+		r, err := s.lru.Get(id)
+		switch {
+		case err == nil:
+			records = append(records, r)
+		case errors.Is(err, lru.ErrCacheMiss):
+			// Each WAL reader scans its segment from the start, so reading the
+			// misses one ID at a time cost one segment scan per record. Read the
+			// rest of the range in a single pass instead.
+			return s.readAndCacheRange(ctx, records, id, last)
+		default:
 			return nil, err
 		}
-
-		records = append(records, r)
 	}
 
 	return records, nil
@@ -335,33 +353,29 @@ func (s *Stream) ReconcileCache(ctx context.Context) error {
 	}
 }
 
-func (s *Stream) lazyLoadRecord(ctx context.Context, id uint64) (*storage.Record, error) {
-	record, err := s.lru.Get(id)
-	if err != nil {
-		switch {
-		case errors.Is(err, lru.ErrCacheMiss):
-			return s.readAndCacheRecord(ctx, id)
-		default:
-			return nil, err
-		}
-	}
+// readAndCacheRange reads [fromID, toID] from the WAL in one pass, caches each
+// record and appends it to records.
+func (s *Stream) readAndCacheRange(ctx context.Context, records []*storage.Record, fromID, toID uint64) ([]*storage.Record, error) {
+	err := s.storage.ReadEach(ctx, fromID, toID, func(r *storage.Record) error {
+		s.lru.Put(r.ID, r)
+		records = append(records, r)
 
-	return record, nil
-}
-
-func (s *Stream) readAndCacheRecord(ctx context.Context, id uint64) (*storage.Record, error) {
-	records, err := s.storage.Read(ctx, id, id)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	r := records[0]
-	s.lru.Put(id, r)
-
-	return r, nil
+	return records, nil
 }
 
+// fetchAndCacheRecords loads the newest cacheSize records of [fromID, toID]
+// into the cache. Loading more would only have the newer records evict them.
 func (s *Stream) fetchAndCacheRecords(ctx context.Context, fromID, toID uint64) error {
+	if s.cacheSize > 0 && toID-fromID+1 > uint64(s.cacheSize) {
+		fromID = toID - uint64(s.cacheSize) + 1
+	}
+
 	return s.storage.ReadEach(ctx, fromID, toID, func(r *storage.Record) error {
 		s.lru.Put(r.ID, r)
 		return nil

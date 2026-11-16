@@ -51,6 +51,14 @@ func (s *StreamSuite) newRecords(count int) []*storage.Record {
 func (s *StreamSuite) start(preload int) *started {
 	s.T().Helper()
 
+	return s.startSized(preload, 1024, 0)
+}
+
+// startSized is start with an LRU of capacity and a stream that preloads the
+// newest cacheSize records (zero preloads all of them).
+func (s *StreamSuite) startSized(preload, capacity, cacheSize int) *started {
+	s.T().Helper()
+
 	w, _, err := wal.Open(s.T().TempDir())
 	s.Require().NoError(err)
 
@@ -62,8 +70,13 @@ func (s *StreamSuite) start(preload int) *started {
 		s.Require().NoError(err)
 	}
 
-	cache := lru.New[storage.Record](1024)
-	str, err := stream.New(stream.WithStorage(st), stream.WithCache(cache), stream.WithSubscriberBuffer(1))
+	cache := lru.New[storage.Record](capacity)
+	str, err := stream.New(
+		stream.WithStorage(st),
+		stream.WithCache(cache),
+		stream.WithCacheSize(cacheSize),
+		stream.WithSubscriberBuffer(1),
+	)
 	s.Require().NoError(err)
 
 	var wg sync.WaitGroup
@@ -168,4 +181,79 @@ func (s *StreamSuite) TestAddAfterStopReturnsResult() {
 	s.Equal(uint64(3), actual.AddedRange.First())
 	s.Equal(uint64(5), actual.AddedRange.Last())
 	s.Equal(uint64(2), actual.StreamRange.Last())
+}
+
+// cachedIDs lists which of the IDs 1..upTo are in the cache.
+func cachedIDs(cache *lru.LRU[storage.Record], upTo uint64) []uint64 {
+	var ids []uint64
+	for id := uint64(1); id <= upTo; id++ {
+		if _, err := cache.Get(id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+
+	return ids
+}
+
+// Start loads only the newest cacheSize records, the ones a cache of that size
+// would keep anyway.
+func (s *StreamSuite) TestStartLoadsNewestRecords() {
+	tests := []struct {
+		name        string
+		preload     int
+		cacheSize   int
+		expectedIDs []uint64
+	}{
+		{name: "more records than the cache", preload: 10, cacheSize: 4, expectedIDs: []uint64{7, 8, 9, 10}},
+		{name: "fewer records than the cache", preload: 3, cacheSize: 4, expectedIDs: []uint64{1, 2, 3}},
+		{name: "zero size loads everything", preload: 5, cacheSize: 0, expectedIDs: []uint64{1, 2, 3, 4, 5}},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			str := s.startSized(tc.preload, 1024, tc.cacheSize)
+
+			actual := cachedIDs(str.cache, uint64(tc.preload))
+			s.Equal(tc.expectedIDs, actual)
+		})
+	}
+}
+
+// Records no longer in the cache are read from the WAL, in order and with the
+// payloads that were written, and are cached again.
+func (s *StreamSuite) TestGetReadsEvictedRecords() {
+	tests := []struct {
+		name        string
+		fromID      uint64
+		toID        uint64
+		expectedIDs []uint64
+	}{
+		{name: "all evicted", fromID: 1, toID: 3, expectedIDs: []uint64{1, 2, 3}},
+		{name: "evicted then cached", fromID: 5, toID: 8, expectedIDs: []uint64{5, 6, 7, 8}},
+		{name: "all cached", fromID: 8, toID: 10, expectedIDs: []uint64{8, 9, 10}},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			// Preloading 4 of 10 records caches only IDs 7..10. The LRU is large
+			// enough that nothing read back is evicted.
+			str := s.startSized(10, 1024, 4)
+
+			records, err := str.stream.Get(context.Background(), tc.fromID, tc.toID)
+			s.Require().NoError(err)
+
+			actual := make([]uint64, 0, len(records))
+			for _, r := range records {
+				actual = append(actual, r.ID)
+
+				expected, readErr := str.storage.Read(context.Background(), r.ID, r.ID)
+				s.Require().NoError(readErr)
+				s.Equal(expected[0].Bytes, r.Bytes)
+
+				_, cacheErr := str.cache.Get(r.ID)
+				s.NoError(cacheErr, "record %d must be cached after Get", r.ID)
+			}
+			s.Equal(tc.expectedIDs, actual)
+		})
+	}
 }

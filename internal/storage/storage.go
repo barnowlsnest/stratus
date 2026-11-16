@@ -253,8 +253,10 @@ func (s *Storage) Subscribe(ctx context.Context, fromID uint64, buffer int) (rec
 	recordsCh := make(chan *Record, buffer)
 	s.subsWG.Go(func() {
 		defer close(recordsCh)
-		for entry := range f.RecordsChan(ctx) {
-			recordsCh <- &Record{ID: entry.LSN, Bytes: bytes.Clone(entry.Payload)}
+		// Records already hands out a fresh copy of each payload, and ranging
+		// over it directly avoids RecordsChan's extra goroutine and channel hop.
+		for lsn, payload := range f.Records(ctx) {
+			recordsCh <- &Record{ID: lsn, Bytes: payload}
 		}
 
 		if errClose := f.Close(); errClose != nil {
