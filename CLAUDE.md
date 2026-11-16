@@ -42,7 +42,8 @@ internal/dedup   time-windowed dedup-key set
 
 `cmd/app/stratus.go` wires them bottom-up (wal → storage+dedup → stream+lru → grpc server) and runs
 three errgroup goroutines: signal handling, `stream.Start`, and `grpc.Serve`. `stream.Start` preloads
-the cache from the WAL range, then blocks forever consuming a `storage.Subscribe` follower channel
+the newest `cache_size` records of the WAL range (`stream.WithCacheSize`; `ReconcileCache` does the
+same), then blocks forever consuming a `storage.Subscribe` follower channel
 (buffered by `subscriber_buffer`, default 1024). It puts every record already waiting into the LRU
 and then fires one `notify()`, so each `ReadOffset` tail wakes to a batch and sends it as one
 message; a `notify()` per record made gRPC socket writes and the notify lock the bottleneck with
@@ -50,8 +51,9 @@ many tails. Startup waits on `WaitForStart` before
 serving, so the cache is warm before the first RPC.
 
 Reads go through the cache: `Stream.Get` clamps the range in storage to the last ID the cache-fill
-loop has put into the LRU (`lastCached`), then `lazyLoadRecord` serves each ID from the LRU and
-falls back to a single-record WAL read (caching the result) only for evicted records. `Stream.Add`
+loop has put into the LRU (`lastCached`), then serves each ID from the LRU; at the first evicted ID
+it reads the rest of the range from the WAL in one pass and caches every record (a WAL reader scans
+its segment from the start, so per-record reads cost one segment scan each). `Stream.Add`
 waits until `lastCached` reaches its last ID before returning, and reported stream ranges end at
 `lastCached`.
 `ReadOffset` is the live tail — the handler drains what exists and then waits on `Stream.DataReady()`
