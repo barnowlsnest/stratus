@@ -89,6 +89,10 @@ func (fakeStream) Get(context.Context, uint64, uint64, []*storage.Record) ([]*st
 	return nil, nil
 }
 
+func (fakeStream) GetBatch(context.Context, uint64, uint64, []*storage.Record) ([]*storage.Record, error) {
+	return nil, nil
+}
+
 func (fakeStream) Del(context.Context, uint64) (stream.DelResult, error) {
 	return stream.DelResult{}, nil
 }

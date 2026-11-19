@@ -12,6 +12,13 @@ import (
 	"github.com/barnowlsnest/stratus/internal/storage"
 )
 
+// DefaultMaxReadBytes is the encoded-size budget of one GetBatch. gRPC encodes
+// each message into a pooled buffer of 256 B, 4 KB, 16 KB, 32 KB or 1 MB, and a
+// lagging tail holds one. Staying under 32 KiB keeps that buffer at 32 KB: with
+// 2048 lagging tails, 1024-record messages took 1 MB buffers each and peaked at
+// 3.4 GiB RSS, against 427 MiB with messages under 32 KB, at the same CPU.
+const DefaultMaxReadBytes = 32_000
+
 type (
 	Info struct {
 		FirstID       uint64
@@ -25,8 +32,10 @@ type (
 		// cacheSize is how many of the newest records Start and ReconcileCache
 		// load. Zero loads the whole WAL range.
 		cacheSize int
-		storage   *storage.Storage
-		lru       *lru.LRU[storage.Record]
+		// maxReadBytes is the largest encoded size GetBatch returns.
+		maxReadBytes int
+		storage      *storage.Storage
+		lru          *lru.LRU[storage.Record]
 		// recent holds the newest subscriberBuffer records for caught-up tails.
 		recent  *recent
 		stop    context.CancelFunc
@@ -110,6 +119,16 @@ func WithCacheSize(size int) Option {
 	}
 }
 
+// WithMaxReadBytes sets the largest encoded size of one GetBatch: each record's
+// payload plus an upper bound on its protobuf overhead. Keep it under the
+// clients' gRPC receive limit (4 MiB by default). Zero or less uses
+// DefaultMaxReadBytes.
+func WithMaxReadBytes(size int) Option {
+	return func(s *Stream) {
+		s.maxReadBytes = size
+	}
+}
+
 func New(opts ...Option) (*Stream, error) {
 	s := &Stream{
 		startedChan:     make(chan struct{}),
@@ -124,6 +143,9 @@ func New(opts ...Option) (*Stream, error) {
 	}
 
 	s.recent = newRecent(s.subscriberBuffer)
+	if s.maxReadBytes <= 0 {
+		s.maxReadBytes = DefaultMaxReadBytes
+	}
 
 	return s, nil
 }
@@ -327,6 +349,29 @@ func (s *Stream) Get(ctx context.Context, fromID, toID uint64, dst []*storage.Re
 		return dst, err
 	}
 
+	return s.getRange(ctx, first, last, dst, &readBudget{})
+}
+
+// GetBatch is Get for a read sent as one message, such as a tail's. It reads at
+// most the storage's max read batch size records, and stops before the record
+// that would take their encoded size past maxReadBytes; the first record is always
+// returned, however large, so a reader never stalls on it. A reader far behind
+// thus gets its backlog in bounded batches: in one message it held the whole
+// backlog in server memory and failed past the client's receive limit.
+func (s *Stream) GetBatch(ctx context.Context, fromID, toID uint64, dst []*storage.Record) ([]*storage.Record, error) {
+	first, last, err := s.storage.ClampBatch(fromID, toID, s.lastCached.Load())
+	if err != nil {
+		return dst, err
+	}
+
+	return s.getRange(ctx, first, last, dst, &readBudget{limit: s.maxReadBytes})
+}
+
+// getRange appends the records first through last to dst, an already clamped
+// range, until budget stops taking them.
+func (s *Stream) getRange(
+	ctx context.Context, first, last uint64, dst []*storage.Record, budget *readBudget,
+) ([]*storage.Record, error) {
 	// The next ID to read is always base plus the length of records. Should
 	// base wrap below zero, adding the length wraps it back.
 	start := len(dst)
@@ -335,8 +380,9 @@ func (s *Stream) Get(ctx context.Context, fromID, toID uint64, dst []*storage.Re
 
 	// A caught-up tail finds its whole range among the recent records.
 	records = s.recent.appendRange(first, last, records)
+	records, fits := budget.fit(records, start)
 	next := base + uint64(len(records))
-	if next > last {
+	if !fits || next > last {
 		return records, nil
 	}
 
@@ -346,11 +392,18 @@ func (s *Stream) Get(ctx context.Context, fromID, toID uint64, dst []*storage.Re
 	cached, err := s.lru.GetRange(next, last, records)
 	switch {
 	case err == nil:
+		cached, _ = budget.fit(cached, len(records))
+
 		return cached, nil
 	case errors.Is(err, lru.ErrCacheMiss):
+		cached, fits = budget.fit(cached, len(records))
+		if !fits {
+			return cached, nil
+		}
+
 		// Read the rest of the range from the first miss with one WAL reader,
 		// which costs one open and one index lookup instead of one per record.
-		read, readErr := s.readRange(ctx, cached, base+uint64(len(cached)), last)
+		read, readErr := s.readRange(ctx, cached, base+uint64(len(cached)), last, budget)
 		if readErr != nil {
 			return records[:start], readErr
 		}
@@ -423,13 +476,20 @@ func (s *Stream) ReconcileCache(ctx context.Context) error {
 // record to records. The records are not cached: a reader far behind would
 // otherwise fill the cache with old records and evict the newest ones, which
 // every live tail reads, sending all of them to the WAL as well.
-func (s *Stream) readRange(ctx context.Context, records []*storage.Record, fromID, toID uint64) ([]*storage.Record, error) {
+// It stops once budget refuses a record, so a reader far behind does not read
+// its whole backlog into memory.
+func (s *Stream) readRange(
+	ctx context.Context, records []*storage.Record, fromID, toID uint64, budget *readBudget,
+) ([]*storage.Record, error) {
 	err := s.storage.ReadEach(ctx, fromID, toID, func(r *storage.Record) error {
+		if !budget.take(len(r.Bytes)) {
+			return errBudgetSpent
+		}
 		records = append(records, r)
 
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errBudgetSpent) {
 		return nil, err
 	}
 

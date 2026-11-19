@@ -86,8 +86,14 @@ needs a matching DTO/conversion change there.
 
 `cmd/cli` is a cobra CLI (one command per RPC) plus a bubbletea TUI (`--tui`) in `cmd/cli/tui`.
 
-Known gap: `config.MaxBatchReadSize` (`max_batch_read_size`) is parsed but never wired into storage,
-which keeps `defaultReadBatchSize = 64`.
+`ReadOffset` reads through `Stream.GetBatch`, which bounds each message: at most
+`max_batch_read_size` records (`storage.ClampBatch`) and `max_read_bytes` of encoded size, always
+at least one record. The budget counts each record as its payload plus `recordOverhead` (20 bytes,
+an upper bound on protobuf's per-record cost). The 32,000 default keeps messages under 32 KiB, so
+gRPC encodes them into 32 KB pooled buffers: larger messages take 1 MB buffers, one per lagging
+tail, which was 3.4 GiB RSS with 2048 tails. Before the limits, a tail far behind got its whole
+backlog in one message and failed past the client's 4 MiB receive limit. `ReadRange` still uses
+`Get`, which has neither limit.
 
 ## Conventions
 

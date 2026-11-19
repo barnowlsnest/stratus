@@ -30,6 +30,7 @@ type (
 	Stream interface {
 		Add(ctx context.Context, records []*storage.Record) (stream.AddResult, error)
 		Get(ctx context.Context, fromID, toID uint64, dst []*storage.Record) ([]*storage.Record, error)
+		GetBatch(ctx context.Context, fromID, toID uint64, dst []*storage.Record) ([]*storage.Record, error)
 		Del(ctx context.Context, upTo uint64) (stream.DelResult, error)
 		Info() stream.Info
 		FirstID() uint64
@@ -119,8 +120,10 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 			return toStatus(storage.ErrOutOfBounds)
 		}
 
+		// GetBatch bounds each message by record count and payload bytes, so a
+		// tail far behind catches up in steps instead of in one oversized message.
 		var err error
-		recs, err = s.stream.Get(ctx, nextID, endID, recs)
+		recs, err = s.stream.GetBatch(ctx, nextID, endID, recs)
 		switch {
 		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			return nil

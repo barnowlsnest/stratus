@@ -58,12 +58,12 @@ func run() error {
 
 	defer func() { _ = w.Close() }()
 
-	walStorage, err := newStorage(w, dedup.New(appCfg.DedupWindow))
+	walStorage, err := newStorage(w, dedup.New(appCfg.DedupWindow), appCfg.MaxBatchReadSize)
 	if err != nil {
 		return err
 	}
 
-	walStream, err := newStream(walStorage, appCfg.CacheSize, appCfg.SubscriberBuffer)
+	walStream, err := newStream(walStorage, appCfg)
 	if err != nil {
 		return err
 	}
@@ -182,18 +182,22 @@ func newWAL(appCfg *config.Config, appLogger *logger.Logger) (*wal.WAL, error) {
 	return w, nil
 }
 
-func newStorage(w *wal.WAL, d *dedup.Deduplicator) (*storage.Storage, error) {
+// newStorage builds the storage; a maxReadBatch of zero or less keeps the
+// storage's default.
+func newStorage(w *wal.WAL, d *dedup.Deduplicator, maxReadBatch int) (*storage.Storage, error) {
 	return storage.New(
 		storage.WithDeduplicator(d),
 		storage.WithWAL(w),
+		storage.WithMaxReadBatchSize(uint64(max(maxReadBatch, 0))),
 	)
 }
 
-func newStream(s *storage.Storage, cacheSize, subscriberBuffer int) (*stream.Stream, error) {
+func newStream(s *storage.Storage, appCfg *config.Config) (*stream.Stream, error) {
 	return stream.New(
 		stream.WithStorage(s),
-		stream.WithCache(lru.New[storage.Record](cacheSize)),
-		stream.WithCacheSize(cacheSize),
-		stream.WithSubscriberBuffer(subscriberBuffer),
+		stream.WithCache(lru.New[storage.Record](appCfg.CacheSize)),
+		stream.WithCacheSize(appCfg.CacheSize),
+		stream.WithSubscriberBuffer(appCfg.SubscriberBuffer),
+		stream.WithMaxReadBytes(appCfg.MaxReadBytes),
 	)
 }

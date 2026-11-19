@@ -114,6 +114,22 @@ func (s *Storage) ClampRange(fromID, toID, ceiling uint64) (from, to uint64, err
 	return fromID, toID, nil
 }
 
+// ClampBatch is ClampRange for a read sent to a client as one message: it also
+// ends the range after at most the max read batch size records, so a reader far
+// behind gets its backlog in bounded batches instead of in one message.
+func (s *Storage) ClampBatch(fromID, toID, ceiling uint64) (from, to uint64, err error) {
+	from, to, err = s.ClampRange(fromID, toID, ceiling)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if to-from+1 > s.maxReadBatchSize {
+		to = from + s.maxReadBatchSize - 1
+	}
+
+	return from, to, nil
+}
+
 func (s *Storage) Write(ctx context.Context, records []*Record) (*BatchWriteResult, error) {
 	if len(records) == 0 {
 		return nil, ErrEmptyRecord

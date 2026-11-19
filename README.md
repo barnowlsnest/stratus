@@ -79,7 +79,7 @@ reading stays inside the cache. Writes are bound by fsync, so the disk matters m
 
 ### Sizing one server
 
-RAM is mostly made of three parts:
+RAM is mostly made of four parts:
 
 - **Cache:** `cache_size` × record size.
 - **Dedup keys:** every record's key is kept for `dedup_window` (default 1 min), so the key set
@@ -87,6 +87,9 @@ RAM is mostly made of three parts:
 - **Follower queue:** up to `subscriber_buffer` (default 1024) waiting records, each with a copy of
   its payload. The newest `subscriber_buffer` records also stay referenced for tails, which only
   costs extra memory when `cache_size` is smaller.
+- **Lagging tails:** each tail that is behind its reader holds one encoded message in gRPC's send
+  buffers: 32 KB at the default `max_read_bytes`, 1 MB above it (see
+  [Tail message size](#tail-message-size)).
 
 Go's garbage collector can roughly double the live heap. Set `GOMEMLIMIT` to about 80% of the
 memory you give the server.
@@ -109,7 +112,10 @@ memory you give the server.
 - **`ReadOffset`** sends at most `max_records` − 1 records per request, and its timeout must be
   between 61 ms and 24 h.
 - **`Delete` cannot empty the stream:** the record at `end_id` stays.
-- **`max_batch_read_size` is not wired up** and has no effect.
+- **`ReadOffset` messages are bounded:** each carries at most `max_batch_read_size` records and
+  stops before the record that would take its encoded size past `max_read_bytes`, so a tail far
+  behind catches up in steps. A single record larger than `max_read_bytes` is still sent, on its
+  own. See [Tail message size](#tail-message-size) for the default.
 
 ### Scaling
 
@@ -135,6 +141,25 @@ Known limits in the code that would raise these ceilings:
 - an index inside each WAL segment, for reads outside the cache;
 - less locking in the LRU, which takes one exclusive lock per read of records older than the newest
   `subscriber_buffer`.
+
+### Tail message size
+
+`max_read_bytes` caps the encoded size of each `ReadOffset` message, counting every record as its
+payload plus 20 bytes of protobuf overhead. Keep the default of 32,000.
+
+gRPC encodes each outgoing message into a buffer from a pool of fixed sizes: 256 B, 4 KB, 16 KB,
+32 KB and then 1 MB. A message up to 32 KiB gets a 32 KB buffer; anything larger, even slightly,
+gets a 1 MB one. A tail that keeps up sends small messages and returns its buffer at once, but a tail
+that is behind its reader holds a full message until the reader takes it. With many slow readers at
+the same time, that is one buffer per tail, so a budget above 32 KiB multiplies tail memory by about 30.
+
+Larger messages buy little in return: a tail sends the same records in fewer `Send` calls, which
+saves a small share of CPU and throughput, and latency is no better. The cost of the default falls
+on streams of large records, where tails lose batching: a record over about 16 KB goes in a message
+of its own.
+
+Raise `max_read_bytes` only when tails rarely fall behind and records are large; keep it under the
+clients' gRPC receive limit (4 MiB by default).
 
 ## API
 
@@ -280,7 +305,8 @@ Settings come from flags or environment variables of the same name (uppercased).
 | `wal_batch_size`       | `16`        | WAL records per fsync batch                                                                                                |
 | `wal_max_segment_size` | `64MB`      | segment size before rotation                                                                                               |
 | `wal_max_record_size`  | `8MB`       | largest single record the WAL accepts; gRPC's default 4 MiB receive limit applies first, so `Add` rejects a 4 MiB record    |
-| `max_batch_read_size`  | `1024`      | **not wired up**: the storage read cap stays at its default of 64; it bounds single `Read` batches only, not cache warming |
+| `max_batch_read_size`  | `1024`      | most records in one `ReadOffset` message                                                                                   |
+| `max_read_bytes`       | `32000`     | most encoded bytes in one `ReadOffset` message; see [Tail message size](#tail-message-size)                                |
 | `auth_token`           | —           | bearer token every RPC must carry; env `AUTH_TOKEN` only, no flag; optional                                                |
 | `tls_cert_file`        | —           | PEM certificate; enables TLS together with `tls_key_file`                                                                  |
 | `tls_key_file`         | —           | PEM private key; enables TLS together with `tls_cert_file`                                                                 |

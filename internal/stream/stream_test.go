@@ -67,23 +67,47 @@ func (s *StreamSuite) startSized(preload, capacity, cacheSize int) *started {
 func (s *StreamSuite) startBuffered(preload, capacity, cacheSize, buffer int) *started {
 	s.T().Helper()
 
+	return s.startWith(startConfig{preload: s.newRecords(preload), capacity: capacity, cacheSize: cacheSize, buffer: buffer})
+}
+
+// startConfig is what startWith builds a stream from; zero read limits keep the
+// storage's and the stream's defaults.
+type startConfig struct {
+	preload      []*storage.Record
+	capacity     int
+	cacheSize    int
+	buffer       int
+	maxReadBytes int
+	maxReadBatch uint64
+}
+
+// startWith writes cfg.preload straight to storage, then starts a stream over
+// it as cfg describes and waits until the cache is warm.
+func (s *StreamSuite) startWith(cfg startConfig) *started {
+	s.T().Helper()
+
 	w, _, err := wal.Open(s.T().TempDir())
 	s.Require().NoError(err)
 
-	st, err := storage.New(storage.WithWAL(w), storage.WithDeduplicator(dedup.New(0)))
+	st, err := storage.New(
+		storage.WithWAL(w),
+		storage.WithDeduplicator(dedup.New(0)),
+		storage.WithMaxReadBatchSize(cfg.maxReadBatch),
+	)
 	s.Require().NoError(err)
 
-	if preload > 0 {
-		_, err = st.Write(context.Background(), s.newRecords(preload))
+	if len(cfg.preload) > 0 {
+		_, err = st.Write(context.Background(), cfg.preload)
 		s.Require().NoError(err)
 	}
 
-	cache := lru.New[storage.Record](capacity)
+	cache := lru.New[storage.Record](cfg.capacity)
 	str, err := stream.New(
 		stream.WithStorage(st),
 		stream.WithCache(cache),
-		stream.WithCacheSize(cacheSize),
-		stream.WithSubscriberBuffer(buffer),
+		stream.WithCacheSize(cfg.cacheSize),
+		stream.WithSubscriberBuffer(cfg.buffer),
+		stream.WithMaxReadBytes(cfg.maxReadBytes),
 	)
 	s.Require().NoError(err)
 
@@ -407,4 +431,104 @@ func (s *StreamSuite) TestDelEvictsDeletedRecords() {
 			s.Equal(tc.expectedCachedIDs, cachedIDs(str.cache, uint64(tc.preload)))
 		})
 	}
+}
+
+// newSizedRecords builds count records of size bytes each, with dedup keys
+// unique within the suite.
+func (s *StreamSuite) newSizedRecords(count, size int) []*storage.Record {
+	records := make([]*storage.Record, 0, count)
+	for range count {
+		s.nextKey++
+		records = append(records, &storage.Record{DedupKey: s.nextKey, Bytes: make([]byte, size)})
+	}
+
+	return records
+}
+
+func recordIDs(records []*storage.Record) []uint64 {
+	ids := make([]uint64, 0, len(records))
+	for _, r := range records {
+		ids = append(ids, r.ID)
+	}
+
+	return ids
+}
+
+// GetBatch stops at the max read batch size and before the record that would
+// take the encoded size past maxReadBytes, whether the records come from the
+// newest records kept for tails, from the LRU or from the WAL, and always
+// returns the first record even when it alone is over the budget. All records
+// have 10-byte payloads, which the budget counts as 30 bytes with overhead.
+func (s *StreamSuite) TestGetBatchLimits() {
+	const (
+		recent = iota
+		cached
+		evicted
+	)
+
+	tests := []struct {
+		name         string
+		source       int
+		fromID       uint64
+		maxReadBatch uint64
+		maxReadBytes int
+		expectedIDs  []uint64
+	}{
+		{name: "recent, cut by bytes", source: recent, fromID: 1, maxReadBatch: 1024, maxReadBytes: 95, expectedIDs: []uint64{1, 2, 3}},
+		{name: "recent, budget exactly met", source: recent, fromID: 5, maxReadBatch: 1024, maxReadBytes: 90, expectedIDs: []uint64{5, 6, 7}},
+		{name: "recent, record over budget", source: recent, fromID: 1, maxReadBatch: 1024, maxReadBytes: 5, expectedIDs: []uint64{1}},
+		{name: "recent, cut by count", source: recent, fromID: 1, maxReadBatch: 4, maxReadBytes: 1 << 20, expectedIDs: []uint64{1, 2, 3, 4}},
+		{name: "cached, cut by bytes", source: cached, fromID: 1, maxReadBatch: 1024, maxReadBytes: 95, expectedIDs: []uint64{1, 2, 3}},
+		{name: "cached, record over budget", source: cached, fromID: 1, maxReadBatch: 1024, maxReadBytes: 5, expectedIDs: []uint64{1}},
+		{name: "cached, cut by count", source: cached, fromID: 1, maxReadBatch: 4, maxReadBytes: 1 << 20, expectedIDs: []uint64{1, 2, 3, 4}},
+		{name: "evicted, cut by bytes", source: evicted, fromID: 1, maxReadBatch: 1024, maxReadBytes: 95, expectedIDs: []uint64{1, 2, 3}},
+		{name: "evicted, record over budget", source: evicted, fromID: 1, maxReadBatch: 1024, maxReadBytes: 5, expectedIDs: []uint64{1}},
+		{name: "evicted, cut by count", source: evicted, fromID: 1, maxReadBatch: 4, maxReadBytes: 1 << 20, expectedIDs: []uint64{1, 2, 3, 4}},
+		{
+			name: "evicted, whole range fits", source: evicted, fromID: 3, maxReadBatch: 1024, maxReadBytes: 1 << 20,
+			expectedIDs: []uint64{3, 4, 5, 6, 7, 8, 9, 10},
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			// recent keeps all 10 records for tails; cached keeps only ID 10 there
+			// and the rest in the LRU; evicted preloads only IDs 7..10, so reads
+			// from ID 1 go to the WAL.
+			cfg := startConfig{
+				preload:      s.newSizedRecords(10, 10),
+				capacity:     1024,
+				buffer:       64,
+				maxReadBatch: tc.maxReadBatch,
+				maxReadBytes: tc.maxReadBytes,
+			}
+			switch tc.source {
+			case cached:
+				cfg.buffer = 1
+			case evicted:
+				cfg.buffer, cfg.cacheSize = 1, 4
+			}
+			str := s.startWith(cfg)
+
+			actual, err := str.stream.GetBatch(context.Background(), tc.fromID, ^uint64(0), nil)
+			s.Require().NoError(err)
+			s.Equal(tc.expectedIDs, recordIDs(actual))
+		})
+	}
+}
+
+// Get, used by ReadRange, is held to neither GetBatch limit.
+func (s *StreamSuite) TestGetIgnoresBatchLimits() {
+	str := s.startWith(startConfig{
+		preload:      s.newSizedRecords(10, 10),
+		capacity:     1024,
+		buffer:       1,
+		cacheSize:    4,
+		maxReadBatch: 2,
+		maxReadBytes: 5,
+	})
+
+	actual, err := str.stream.Get(context.Background(), 1, 10, nil)
+	s.Require().NoError(err)
+	s.Equal([]uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, recordIDs(actual))
 }

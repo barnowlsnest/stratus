@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	stratusv1api "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
@@ -71,10 +72,17 @@ func (s *ServerSuite) TestToOutputRecords() {
 func (s *ServerSuite) startServer() (*stream.Stream, *stratusv1.Client) {
 	s.T().Helper()
 
+	return s.startServerWith()
+}
+
+// startServerWith is startServer with extra storage options.
+func (s *ServerSuite) startServerWith(opts ...storage.Option) (*stream.Stream, *stratusv1.Client) {
+	s.T().Helper()
+
 	w, _, err := wal.Open(s.T().TempDir())
 	s.Require().NoError(err)
 
-	st, err := storage.New(storage.WithWAL(w), storage.WithDeduplicator(dedup.New(0)))
+	st, err := storage.New(append([]storage.Option{storage.WithWAL(w), storage.WithDeduplicator(dedup.New(0))}, opts...)...)
 	s.Require().NoError(err)
 
 	str, err := stream.New(
@@ -142,13 +150,92 @@ func (s *ServerSuite) TestReadOffsetHugeMaxRecords() {
 	s.Equal([]uint64{1, 2, 3, 4, 5}, s.receiveIDs(ch, 5))
 }
 
+// A tail starting further behind than one message can carry still receives
+// every record. It used to get its whole backlog in one message, which a client
+// with gRPC's default 4 MiB receive limit rejected, so it never caught up. The
+// batch size is raised so only the byte budget bounds the messages.
+func (s *ServerSuite) TestReadOffsetCatchesUpFromFarBehind() {
+	const (
+		batches   = 80
+		batchSize = 256
+		payload   = 256
+		total     = batches * batchSize
+	)
+
+	str, client := s.startServerWith(storage.WithMaxReadBatchSize(1 << 20))
+	for range batches {
+		records := s.newRecords(batchSize)
+		for _, r := range records {
+			r.Bytes = make([]byte, payload)
+		}
+		_, err := str.Add(context.Background(), records)
+		s.Require().NoError(err)
+	}
+
+	ch, err := client.ReadOffset(context.Background(), 1, 1<<40, readOffsetWait)
+	s.Require().NoError(err)
+
+	expected := make([]uint64, 0, total)
+	for id := uint64(1); id <= total; id++ {
+		expected = append(expected, id)
+	}
+	s.Equal(expected, s.receiveIDs(ch, total))
+}
+
+// sizeSender is a ReadOffset stream that records how many records and encoded
+// bytes each response carried.
+type sizeSender struct {
+	grpc.ServerStreamingServer[stratusv1api.ReadResponse]
+	sizes   []int
+	records int
+}
+
+func (c *sizeSender) Context() context.Context { return context.Background() }
+
+func (c *sizeSender) Send(response *stratusv1api.ReadResponse) error {
+	c.sizes = append(c.sizes, proto.Size(response))
+	c.records += len(response.GetRecords())
+
+	return nil
+}
+
+// Every ReadOffset message encodes to at most 32 KiB, so gRPC sends it from a
+// 32 KB pooled buffer instead of a 1 MB one. Many small records are the worst
+// case, as protobuf's per-record overhead is then a large share of the message:
+// 1024 records of 31 bytes fit a payload-only budget but encode to about 43 KB.
+func (s *ServerSuite) TestReadOffsetMessagesFitPooledBuffer() {
+	const (
+		total        = 2000
+		payload      = 31
+		pooledBuffer = 32 << 10
+	)
+
+	str, _ := s.startServerWith(storage.WithMaxReadBatchSize(1024))
+	records := s.newRecords(total)
+	for _, r := range records {
+		r.Bytes = make([]byte, payload)
+	}
+	_, err := str.Add(context.Background(), records)
+	s.Require().NoError(err)
+
+	sender := &sizeSender{}
+	req := &stratusv1api.ReadOffsetRequest{StartId: 1, MaxRecords: total + 1, Timeout: durationpb.New(readOffsetWait)}
+	s.Require().NoError(New(str).ReadOffset(req, sender))
+
+	s.Equal(total, sender.records)
+	s.Greater(len(sender.sizes), 1)
+	for _, actual := range sender.sizes {
+		s.LessOrEqual(actual, pooledBuffer)
+	}
+}
+
 // busyStream always has the next record ready, so a tail reading it never
 // catches up and never waits for a wake-up.
 type busyStream struct {
 	Stream
 }
 
-func (busyStream) Get(_ context.Context, fromID, _ uint64, dst []*storage.Record) ([]*storage.Record, error) {
+func (busyStream) GetBatch(_ context.Context, fromID, _ uint64, dst []*storage.Record) ([]*storage.Record, error) {
 	return append(dst, &storage.Record{ID: fromID}), nil
 }
 
