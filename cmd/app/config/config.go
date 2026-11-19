@@ -29,7 +29,7 @@ type Config struct {
 	WALMaxSegmentSize int64         `name:"wal_max_segment_size" usage:"maximum wal segment size in bytes before rotation"`
 	MaxBatchReadSize  int           `name:"max_batch_read_size" default:"1024" usage:"maximum number of records to read in a single batch"`
 	CacheSize         int           `name:"cache_size" default:"4096" usage:"preloader LRU capacity"`
-	SubscriberBuffer  int           `name:"subscriber_buffer" default:"1024" usage:"records the wal follower can queue for the cache"`
+	SubscriberBuffer  int           `name:"subscriber_buffer" default:"1024" usage:"wal follower queue size, and newest records kept for tails"`
 	Port              int           `name:"port" default:"8000" usage:"port to listen on"`
 	WALBatchSize      int           `name:"wal_batch_size" usage:"number of wal records per fsync batch"`
 	WALMaxRecordSize  int           `name:"wal_max_record_size" usage:"maximum wal record size in bytes"`

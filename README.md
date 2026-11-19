@@ -67,7 +67,8 @@ LRU cache and wakes any `ReadOffset` tails waiting for more; `Add` returns once 
 the cache. It caches every record already waiting (up to `subscriber_buffer`) before it wakes the
 tails, so each tail sends them as one message instead of one message per record. Reads never go past the last record the cache has received, so a fresh record is always
 served from the cache. At the first evicted record, the rest of the range is read from the WAL in one
-pass and cached.
+pass. Those records are not cached, so a reader far behind cannot push the newest records, which the
+tails read, out of the cache.
 
 <img src="assets/internals.svg" alt="Record flow: Add goes through dedup to the WAL and returns once a follower has fed its records into the LRU; the follower fires notify(), which wakes ReadOffset tails; ReadRange is served from the LRU, and from the first miss the rest of the range is read from the WAL in one pass; ReconcileCache clears the LRU and reloads the newest cache_size records from the WAL" width="720">
 
@@ -84,7 +85,8 @@ RAM is mostly made of three parts:
 - **Dedup keys:** every record's key is kept for `dedup_window` (default 1 min), so the key set
   grows with the write rate.
 - **Follower queue:** up to `subscriber_buffer` (default 1024) waiting records, each with a copy of
-  its payload.
+  its payload. The newest `subscriber_buffer` records also stay referenced for tails, which only
+  costs extra memory when `cache_size` is smaller.
 
 Go's garbage collector can roughly double the live heap. Set `GOMEMLIMIT` to about 80% of the
 memory you give the server.
@@ -116,7 +118,9 @@ Client side, which gives the biggest gains:
 1. **Batch records in each `Add`.** Each call pays one fsync, so more records per call means more
    records per second.
 2. **Share connections.** Run many `ReadOffset` streams over a few connections per client process.
-   One connection per stream costs the server noticeably more CPU per record.
+   One connection per stream costs the server noticeably more CPU per record. A client not built
+   with `stratusv1.Dial` should raise its flow-control windows (see below), which recovers most of
+   that cost when it does open one connection per stream.
 3. **Keep reads inside the cache.** Raise `cache_size` instead of reading old ranges.
 
 Server side:
@@ -129,8 +133,8 @@ Server side:
 Known limits in the code that would raise these ceilings:
 
 - an index inside each WAL segment, for reads outside the cache;
-- a cheaper dedup structure, since today each key gets its own timer;
-- less locking in the LRU, which takes one exclusive lock per `Get`.
+- less locking in the LRU, which takes one exclusive lock per read of records older than the newest
+  `subscriber_buffer`.
 
 ## API
 
@@ -254,6 +258,12 @@ for r := range ch {
 connection you keep owning (`Close` is then a no-op). Against a loopback server without TLS, use
 `stratusv1.WithInsecure()` instead of `WithTLS`.
 
+`Dial` sets gRPC flow-control windows of 1 MiB per stream and 8 MiB per connection, so the server
+sends tails fewer, larger writes. A reader that falls behind may buffer up to that much, and fixed
+windows turn off gRPC's automatic window sizing. Pass `grpc.WithInitialWindowSize` or
+`grpc.WithInitialConnWindowSize` to `Dial` to override them; `New` leaves the connection as you
+built it.
+
 ## Configuration
 
 Settings come from flags or environment variables of the same name (uppercased).
@@ -266,7 +276,7 @@ Settings come from flags or environment variables of the same name (uppercased).
 | `log_level`            | `info`      | log level                                                                                                                  |
 | `dedup_window`         | `1m`        | how long a dedup key is remembered                                                                                         |
 | `cache_size`           | `4096`      | LRU capacity in records                                                                                                    |
-| `subscriber_buffer`    | `1024`      | records the WAL follower can queue for the cache; each holds a copy of its payload                                         |
+| `subscriber_buffer`    | `1024`      | records the WAL follower can queue for the cache, and the newest records tails read without the LRU lock                   |
 | `wal_batch_size`       | `16`        | WAL records per fsync batch                                                                                                |
 | `wal_max_segment_size` | `64MB`      | segment size before rotation                                                                                               |
 | `wal_max_record_size`  | `8MB`       | largest single record the WAL accepts; gRPC's default 4 MiB receive limit applies first, so `Add` rejects a 4 MiB record    |

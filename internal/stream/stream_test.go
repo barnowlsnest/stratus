@@ -59,6 +59,14 @@ func (s *StreamSuite) start(preload int) *started {
 func (s *StreamSuite) startSized(preload, capacity, cacheSize int) *started {
 	s.T().Helper()
 
+	return s.startBuffered(preload, capacity, cacheSize, 1)
+}
+
+// startBuffered is startSized with a subscriber buffer of buffer, which also
+// sets how many of the newest records the stream keeps for caught-up tails.
+func (s *StreamSuite) startBuffered(preload, capacity, cacheSize, buffer int) *started {
+	s.T().Helper()
+
 	w, _, err := wal.Open(s.T().TempDir())
 	s.Require().NoError(err)
 
@@ -75,7 +83,7 @@ func (s *StreamSuite) startSized(preload, capacity, cacheSize int) *started {
 		stream.WithStorage(st),
 		stream.WithCache(cache),
 		stream.WithCacheSize(cacheSize),
-		stream.WithSubscriberBuffer(1),
+		stream.WithSubscriberBuffer(buffer),
 	)
 	s.Require().NoError(err)
 
@@ -149,7 +157,7 @@ func (s *StreamSuite) TestGetStopsAtLastCached() {
 
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			records, getErr := str.stream.Get(context.Background(), tc.fromID, tc.toID)
+			records, getErr := str.stream.Get(context.Background(), tc.fromID, tc.toID, nil)
 			if tc.expectedErr != nil {
 				s.Require().ErrorIs(getErr, tc.expectedErr)
 
@@ -220,7 +228,8 @@ func (s *StreamSuite) TestStartLoadsNewestRecords() {
 }
 
 // Records no longer in the cache are read from the WAL, in order and with the
-// payloads that were written, and are cached again.
+// payloads that were written, and are not cached again. Records that were
+// already cached stay cached.
 func (s *StreamSuite) TestGetReadsEvictedRecords() {
 	tests := []struct {
 		name        string
@@ -239,7 +248,7 @@ func (s *StreamSuite) TestGetReadsEvictedRecords() {
 			// enough that nothing read back is evicted.
 			str := s.startSized(10, 1024, 4)
 
-			records, err := str.stream.Get(context.Background(), tc.fromID, tc.toID)
+			records, err := str.stream.Get(context.Background(), tc.fromID, tc.toID, nil)
 			s.Require().NoError(err)
 
 			actual := make([]uint64, 0, len(records))
@@ -249,11 +258,153 @@ func (s *StreamSuite) TestGetReadsEvictedRecords() {
 				expected, readErr := str.storage.Read(context.Background(), r.ID, r.ID)
 				s.Require().NoError(readErr)
 				s.Equal(expected[0].Bytes, r.Bytes)
-
-				_, cacheErr := str.cache.Get(r.ID)
-				s.NoError(cacheErr, "record %d must be cached after Get", r.ID)
 			}
 			s.Equal(tc.expectedIDs, actual)
+
+			// Only the preloaded IDs 7..10 are cached, whatever Get read.
+			s.Equal([]uint64{7, 8, 9, 10}, cachedIDs(str.cache, 10))
+		})
+	}
+}
+
+// Get returns the right records, in order and after what dst already holds,
+// whether they come from the newest records kept for tails, from the LRU or
+// from the WAL. With a buffer of 8 the stream keeps IDs 13..20 for tails, and
+// an LRU of 2 has evicted most of the older ones.
+func (s *StreamSuite) TestGetAppendsFromRecentRecords() {
+	str := s.startBuffered(0, 2, 0, 8)
+	for range 4 {
+		_, err := str.stream.Add(context.Background(), s.newRecords(5))
+		s.Require().NoError(err)
+	}
+
+	prefix := &storage.Record{ID: 999}
+
+	tests := []struct {
+		name        string
+		fromID      uint64
+		toID        uint64
+		expectedIDs []uint64
+	}{
+		{name: "only recent records", fromID: 15, toID: 20, expectedIDs: []uint64{999, 15, 16, 17, 18, 19, 20}},
+		{name: "older and recent records", fromID: 10, toID: 14, expectedIDs: []uint64{999, 10, 11, 12, 13, 14}},
+		{name: "only older records", fromID: 1, toID: 4, expectedIDs: []uint64{999, 1, 2, 3, 4}},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			records, err := str.stream.Get(context.Background(), tc.fromID, tc.toID, []*storage.Record{prefix})
+			s.Require().NoError(err)
+			s.Require().Same(prefix, records[0])
+
+			actual := make([]uint64, 0, len(records))
+			for _, r := range records {
+				actual = append(actual, r.ID)
+				if r == prefix {
+					continue
+				}
+
+				expected, readErr := str.storage.Read(context.Background(), r.ID, r.ID)
+				s.Require().NoError(readErr)
+				s.Equal(expected[0].Bytes, r.Bytes)
+			}
+			s.Equal(tc.expectedIDs, actual)
+		})
+	}
+
+	// A read past the newest record fails and hands dst back, so a tail waiting
+	// for new records keeps its slice.
+	dst := []*storage.Record{prefix}
+	actual, err := str.stream.Get(context.Background(), 21, 0, dst)
+	s.Require().ErrorIs(err, storage.ErrOutOfBounds)
+	s.Equal(dst, actual)
+}
+
+// A watcher is woken by each change after Watch, keeps at most one pending
+// wake-up so the stream never blocks on it, and is not woken after stop.
+func (s *StreamSuite) TestWatch() {
+	str := s.start(0)
+	wake, stop := str.stream.Watch()
+
+	received := func() bool {
+		select {
+		case <-wake:
+			return true
+		case <-time.After(50 * time.Millisecond):
+			return false
+		}
+	}
+
+	tests := []struct {
+		name     string
+		adds     int
+		stop     bool
+		expected []bool
+	}{
+		{name: "one add wakes once", adds: 1, expected: []bool{true, false}},
+		{name: "unread adds leave one wake-up", adds: 3, expected: []bool{true, false}},
+		{name: "no wake-up after stop", adds: 1, stop: true, expected: []bool{false}},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			if tc.stop {
+				stop()
+				stop()
+			}
+
+			for range tc.adds {
+				_, err := str.stream.Add(context.Background(), s.newRecords(1))
+				s.Require().NoError(err)
+			}
+
+			actual := make([]bool, 0, len(tc.expected))
+			for range tc.expected {
+				actual = append(actual, received())
+			}
+			s.Equal(tc.expected, actual)
+		})
+	}
+}
+
+// Del removes the deleted IDs from the cache and keeps the record at upTo, both
+// when the deleted range is narrower than the cache and when it is wider and
+// only partly cached.
+func (s *StreamSuite) TestDelEvictsDeletedRecords() {
+	tests := []struct {
+		name              string
+		expectedCachedIDs []uint64
+		preload           int
+		capacity          int
+		cacheSize         int
+		upTo              uint64
+		expectedDeleted   [2]uint64
+		expectedStream    [2]uint64
+	}{
+		{
+			// All 10 records are cached and 3 are deleted.
+			name: "range narrower than the cache", preload: 10, capacity: 1024, cacheSize: 0, upTo: 4,
+			expectedDeleted: [2]uint64{1, 3}, expectedStream: [2]uint64{4, 10},
+			expectedCachedIDs: []uint64{4, 5, 6, 7, 8, 9, 10},
+		},
+		{
+			// Only IDs 7..10 are cached and 8 are deleted, so 7 and 8 must go.
+			name: "range wider than the cache", preload: 10, capacity: 4, cacheSize: 4, upTo: 9,
+			expectedDeleted: [2]uint64{1, 8}, expectedStream: [2]uint64{9, 10},
+			expectedCachedIDs: []uint64{9, 10},
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			str := s.startSized(tc.preload, tc.capacity, tc.cacheSize)
+
+			actual, err := str.stream.Del(context.Background(), tc.upTo)
+			s.Require().NoError(err)
+
+			s.Equal(tc.expectedDeleted, [2]uint64{actual.DeletedRange.First(), actual.DeletedRange.Last()})
+			s.Equal(tc.expectedStream, [2]uint64{actual.StreamRange.First(), actual.StreamRange.Last()})
+			s.Equal(tc.expectedCachedIDs, cachedIDs(str.cache, uint64(tc.preload)))
 		})
 	}
 }

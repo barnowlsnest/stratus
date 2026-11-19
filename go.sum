@@ -10,8 +10,8 @@ github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ
 github.com/aymanbagabas/go-udiff v0.4.1/go.mod h1:0L9PGwj20lrtmEMeyw4WKJ/TMyDtvAoK9bf2u/mNo3w=
 github.com/barnowlsnest/go-configlib/v2 v2.2.0 h1:d1tjkSirhFTFJEInCMRDVgW92OXvZEnn08aCJcMW1e0=
 github.com/barnowlsnest/go-configlib/v2 v2.2.0/go.mod h1:qJY36hNHHZv6Z4u5x4e54Su09xTf9woWYPqfk/fCFVw=
-github.com/barnowlsnest/go-datalib/v5 v5.5.0 h1:muMvVewhxA5Z7Jbl5xQ+srF2ato32zyNRqG5OAEVAsE=
-github.com/barnowlsnest/go-datalib/v5 v5.5.0/go.mod h1:9NyiGvELT8aqg0oNMpagGw65SrrZQPhkESdvcyaQZdo=
+github.com/barnowlsnest/go-datalib/v5 v5.6.0 h1:62qACwRUX8C0Hnrb/XSec1NzfZ6Vhl9F/3kcyBZLaRs=
+github.com/barnowlsnest/go-datalib/v5 v5.6.0/go.mod h1:9NyiGvELT8aqg0oNMpagGw65SrrZQPhkESdvcyaQZdo=
 github.com/barnowlsnest/go-logslib/v2 v2.4.0 h1:QV6w/FEOsBM3ebtSsOfaM9Gd5yWwjh7g5+jXVhUiDI4=
 github.com/barnowlsnest/go-logslib/v2 v2.4.0/go.mod h1:vVIV3C1DK34moPOKmsVSAUsXd1lNC8JYmlrd350rawQ=
 github.com/barnowlsnest/go-wallib v1.8.0 h1:FsI1o6Y/JB1MDigXigeWAhRIoN42XNZgZrsbQEuWj8s=
@@ -20,8 +20,8 @@ github.com/charmbracelet/colorprofile v0.4.3 h1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex
 github.com/charmbracelet/colorprofile v0.4.3/go.mod h1:/zT4BhpD5aGFpqQQqw7a+VtHCzu+zrQtt1zhMt9mR4Q=
 github.com/charmbracelet/ultraviolet v0.0.0-20261023060817-a45b7c86333f h1:D2JpB65eehsnkEwEG401dMBSNYtTDgvKXZZSl7ZCxWI=
 github.com/charmbracelet/ultraviolet v0.0.0-20261023060817-a45b7c86333f/go.mod h1:aJDVk+WOVM1K04rdc/71PMPoUGfjxjhvXfP3Pjz1Zio=
-github.com/charmbracelet/x/ansi v0.11.9 h1:kIrqLBxtTVbLyyHO2Evoi93EjQo1mylWmpNEsfPxXAM=
-github.com/charmbracelet/x/ansi v0.11.9/go.mod h1:DG/hpOnaI2QJ/KMMqLL2h0KVhluuJLazf8973P+Vy5w=
+github.com/charmbracelet/x/ansi v0.11.10 h1:GjcX3+rAk+8wDX/jY0XwrZstxkjRcLkYU3TvwzZWiRA=
+github.com/charmbracelet/x/ansi v0.11.10/go.mod h1:DG/hpOnaI2QJ/KMMqLL2h0KVhluuJLazf8973P+Vy5w=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f h1:pk6gmGpCE7F3FcjaOEKYriCvpmIN4+6OS/RD0vm4uIA=
 github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f/go.mod h1:IfZAMTHB6XkZSeXUqriemErjAWCCzT0LwjKFYCZyw0I=
 github.com/charmbracelet/x/term v0.2.2 h1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSgfgZRk=

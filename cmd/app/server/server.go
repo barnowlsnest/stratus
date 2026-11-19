@@ -21,14 +21,19 @@ var (
 	readOffsetMaxTimeout = 24 * time.Hour
 )
 
+// maxReusedRecords is the largest read slice a ReadOffset tail keeps for its
+// next read. A tail catching up on a long backlog drops its slice instead, so
+// it does not hold that much memory for the rest of the stream.
+const maxReusedRecords = 4096
+
 type (
 	Stream interface {
 		Add(ctx context.Context, records []*storage.Record) (stream.AddResult, error)
-		Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error)
+		Get(ctx context.Context, fromID, toID uint64, dst []*storage.Record) ([]*storage.Record, error)
 		Del(ctx context.Context, upTo uint64) (stream.DelResult, error)
 		Info() stream.Info
 		FirstID() uint64
-		DataReady() <-chan struct{}
+		Watch() (wake <-chan struct{}, stop func())
 		ReconcileCache(ctx context.Context) error
 	}
 
@@ -65,7 +70,7 @@ func (s *Server) ReadRange(ctx context.Context, req *stratusv1.ReadRangeRequest)
 	ctx, cancel := withTimeout(ctx, req.GetTimeout())
 	defer cancel()
 
-	records, err := s.stream.Get(ctx, req.GetStartId(), req.GetEndId())
+	records, err := s.stream.Get(ctx, req.GetStartId(), req.GetEndId(), nil)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -92,9 +97,20 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 		endID = ^uint64(0)
 	}
 
+	// Watch before the first read so no new record between a read and the wait
+	// is missed.
+	wake, stopWatching := s.stream.Watch()
+	defer stopWatching()
+
 	nextID := startID
+	// recs is reused across reads; Send has marshaled the response before it
+	// returns, and the response holds payloads, not this slice.
+	var recs []*storage.Record
 	for {
-		if nextID >= endID {
+		// Checked on every pass, not only while waiting: a tail that always has
+		// records to read never reaches the wait below, and reads from the cache
+		// do not look at ctx.
+		if nextID >= endID || ctx.Err() != nil {
 			return nil
 		}
 
@@ -103,8 +119,8 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 			return toStatus(storage.ErrOutOfBounds)
 		}
 
-		ready := s.stream.DataReady()
-		recs, err := s.stream.Get(ctx, nextID, endID)
+		var err error
+		recs, err = s.stream.Get(ctx, nextID, endID, recs)
 		switch {
 		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			return nil
@@ -121,11 +137,12 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 				return err
 			}
 			nextID += uint64(len(recs))
+			recs = reuseRecords(recs)
 			continue
 		}
 
 		select {
-		case <-ready:
+		case <-wake:
 		case <-ctx.Done():
 			return nil
 		}
@@ -190,16 +207,31 @@ func toStorageRecords(in []*stratusv1.InputRecord) []*storage.Record {
 	return records
 }
 
+// toOutputRecords converts records into one block of OutputRecords and a list
+// pointing into it: two allocations per response instead of one per record
+// plus the list, which every tail paid for every batch it sent.
 func toOutputRecords(in []*storage.Record) []*stratusv1.OutputRecord {
-	out := make([]*stratusv1.OutputRecord, 0, len(in))
-	for _, r := range in {
-		out = append(out, &stratusv1.OutputRecord{
-			Id:      r.ID,
-			RawData: r.Bytes,
-		})
+	block := make([]stratusv1.OutputRecord, len(in))
+	out := make([]*stratusv1.OutputRecord, len(in))
+	for i, r := range in {
+		block[i].Id = r.ID
+		block[i].RawData = r.Bytes
+		out[i] = &block[i]
 	}
 
 	return out
+}
+
+// reuseRecords empties recs for the next read, clearing it so it does not keep
+// sent records alive, or drops it when it is larger than maxReusedRecords.
+func reuseRecords(recs []*storage.Record) []*storage.Record {
+	if cap(recs) > maxReusedRecords {
+		return nil
+	}
+
+	clear(recs)
+
+	return recs[:0]
 }
 
 func toProtoRange(r stream.Range) *stratusv1.Range {

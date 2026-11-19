@@ -51,13 +51,19 @@ many tails. Startup waits on `WaitForStart` before
 serving, so the cache is warm before the first RPC.
 
 Reads go through the cache: `Stream.Get` clamps the range in storage to the last ID the cache-fill
-loop has put into the LRU (`lastCached`), then takes the range from the LRU in one `GetRange`
-lookup (one lock per read, not per ID); from the first evicted ID it reads the rest of the range
-from the WAL in one pass and caches every record. `Stream.Add`
+loop has put into the LRU (`lastCached`), then takes what it can from the newest `subscriber_buffer`
+records (`recent`, a slot per ID under a shared lock, so caught-up tails never take the LRU's
+exclusive lock), the rest from the LRU in one `GetRange` lookup (one lock per read, not per ID);
+from the first evicted ID it reads the rest of the range from the WAL in one pass without caching
+it, so old reads never evict the records tails need. `Get` appends to a caller's slice, which
+`ReadOffset` reuses between reads. `Stream.Add`
 waits until `lastCached` reaches its last ID before returning, and reported stream ranges end at
 `lastCached`.
-`ReadOffset` is the live tail — the handler drains what exists and then waits on `Stream.DataReady()`
-(the channel `notify()` closes and replaces) for more.
+`ReadOffset` is the live tail — the handler registers with `Stream.Watch()` before its first read,
+drains what exists and then waits on its own wake channel (buffered by one; `notify()` leaves a
+wake-up in every tail's channel without blocking) for more. Tails must not share one channel: every
+woken tail re-locks it on the way out of `select`, which was 19% of CPU with 512 tails.
+`Stream.DataReady()` (the channel `notify()` closes and replaces) stays for `Add`'s wait.
 
 Boundary rules, so they stay in one place:
 

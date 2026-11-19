@@ -28,10 +28,31 @@ func New(cc grpc.ClientConnInterface) *Client {
 	return &Client{svc: pb.NewStreamServiceClient(cc)}
 }
 
+const (
+	// streamWindowSize and connWindowSize are the flow-control windows Dial
+	// sets. With gRPC's defaults a server sending ReadOffset tails one per
+	// connection made more, smaller writes and read a steady flow of window
+	// updates; these windows cut that server's CPU by about 40% with 512 tails.
+	// A slow reader may buffer up to a window of data per stream and per
+	// connection, and fixed windows turn off gRPC's automatic window sizing.
+	streamWindowSize = 1 << 20
+	connWindowSize   = 8 << 20
+
+	// maxReadOffsetBuffer is the most records ReadOffset buffers for its caller.
+	maxReadOffsetBuffer = 1024
+)
+
 // Dial creates a client connected to the target. The returned client owns the
-// connection and must be closed with Close.
+// connection and must be closed with Close. It sets 1 MiB stream and 8 MiB
+// connection flow-control windows; options in opts override them.
 func Dial(target string, opts ...grpc.DialOption) (*Client, error) {
-	conn, err := grpc.NewClient(target, opts...)
+	// Later options win, so the caller's come after the defaults.
+	all := append([]grpc.DialOption{
+		grpc.WithInitialWindowSize(streamWindowSize),
+		grpc.WithInitialConnWindowSize(connWindowSize),
+	}, opts...)
+
+	conn, err := grpc.NewClient(target, all...)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +132,9 @@ func (c *Client) ReadRange(ctx context.Context, startID, endID uint64, timeout t
 }
 
 // ReadOffset returns up to maxRecords records starting at startID. A
-// non-positive timeout leaves the read bounded only by ctx.
+// non-positive timeout leaves the read bounded only by ctx. The channel buffers
+// at most 1024 records; read it while records arrive, and cancel ctx to stop
+// early.
 func (c *Client) ReadOffset(ctx context.Context, startID, maxRecords uint64, timeout time.Duration) (<-chan OutputRecord, error) {
 	resp, err := c.svc.ReadOffset(ctx, &pb.ReadOffsetRequest{
 		StartId:    startID,
@@ -122,7 +145,10 @@ func (c *Client) ReadOffset(ctx context.Context, startID, maxRecords uint64, tim
 		return nil, err
 	}
 
-	out := make(chan OutputRecord, maxRecords)
+	// Sizing the buffer by maxRecords allocated it all before the first record
+	// arrived: 32 B per record, so 3.2 GB for 100M, and a panic for larger
+	// values. When the caller falls behind, gRPC flow control slows the server.
+	out := make(chan OutputRecord, min(maxRecords, maxReadOffsetBuffer))
 	go func() {
 		defer close(out)
 		for {

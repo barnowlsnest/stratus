@@ -27,12 +27,16 @@ type (
 		cacheSize int
 		storage   *storage.Storage
 		lru       *lru.LRU[storage.Record]
-		stop      context.CancelFunc
-		started   atomic.Bool
+		// recent holds the newest subscriberBuffer records for caught-up tails.
+		recent  *recent
+		stop    context.CancelFunc
+		started atomic.Bool
 		// lastCached is the highest ID the cache-fill loop has put into the LRU.
 		// The loop receives IDs in order with no gaps, so every ID up to it has
 		// been cached; reads stop here so they never miss on a fresh record.
-		lastCached      atomic.Uint64
+		lastCached atomic.Uint64
+		// watchers are the tails' wake channels; see Watch.
+		watchers        watchers
 		mu              sync.RWMutex
 		newDataReadySig chan struct{}
 		startedChan     chan struct{}
@@ -88,6 +92,9 @@ func WithCache(cache *lru.LRU[storage.Record]) Option {
 	}
 }
 
+// WithSubscriberBuffer sets how many new records may wait for the cache-fill
+// loop, and how many of the newest records caught-up tails read without the
+// LRU's lock.
 func WithSubscriberBuffer(buffer int) Option {
 	return func(s *Stream) {
 		s.subscriberBuffer = buffer
@@ -116,9 +123,13 @@ func New(opts ...Option) (*Stream, error) {
 		return nil, err
 	}
 
+	s.recent = newRecent(s.subscriberBuffer)
+
 	return s, nil
 }
 
+// DataReady returns a channel that is closed on the next change. Every caller
+// shares it, so it suits a few waiters like Add; tails use Watch.
 func (s *Stream) DataReady() <-chan struct{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -151,9 +162,14 @@ func (s *Stream) Start(ctx context.Context) error {
 	close(s.startedChan)
 	s.mu.Unlock()
 	s.started.Store(true)
+	limit := max(s.subscriberBuffer, 1)
+	batch := make([]*storage.Record, 0, limit)
 	for r := range records {
-		s.cacheRecord(r)
-		s.cacheWaiting(records)
+		batch = receiveWaiting(records, append(batch, r), limit)
+		s.cacheBatch(batch)
+		// Drop the references so the batch does not keep evicted records alive.
+		clear(batch)
+		batch = batch[:0]
 		s.notify()
 	}
 
@@ -217,29 +233,38 @@ func (s *Stream) Add(ctx context.Context, records []*storage.Record) (AddResult,
 	return result, nil
 }
 
-// cacheRecord puts one record from the cache-fill loop into the LRU and moves
-// lastCached up to it.
-func (s *Stream) cacheRecord(r *storage.Record) {
-	s.lru.Put(r.ID, r)
-	s.lastCached.Store(r.ID)
+// cacheBatch puts a batch from the cache-fill loop into the LRU and the recent
+// records, then moves lastCached up to its last record. Reads stop at
+// lastCached, so every record a read can ask for is in place before it moves.
+func (s *Stream) cacheBatch(batch []*storage.Record) {
+	for _, r := range batch {
+		s.lru.Put(r.ID, r)
+	}
+
+	s.recent.put(batch...)
+	s.lastCached.Store(batch[len(batch)-1].ID)
 }
 
-// cacheWaiting caches every record already waiting in records without blocking,
-// so one notify covers the whole batch. Every notify wakes every ReadOffset tail
-// and each wake becomes one gRPC message per tail, so with many tails one notify
-// per record made socket writes and the notify lock the bottleneck.
-func (s *Stream) cacheWaiting(records <-chan *storage.Record) {
-	for {
+// receiveWaiting appends every record already waiting in records to batch
+// without blocking, so one notify covers the whole batch. Every notify wakes
+// every ReadOffset tail and each wake becomes one gRPC message per tail, so with
+// many tails one notify per record made socket writes and the notify lock the
+// bottleneck. It stops once batch holds limit records, so records arriving as
+// fast as they are received cannot hold back the notify or grow batch forever.
+func receiveWaiting(records <-chan *storage.Record, batch []*storage.Record, limit int) []*storage.Record {
+	for len(batch) < limit {
 		select {
 		case r, ok := <-records:
 			if !ok {
-				return
+				return batch
 			}
-			s.cacheRecord(r)
+			batch = append(batch, r)
 		default:
-			return
+			return batch
 		}
 	}
+
+	return batch
 }
 
 // waitCached blocks until the cache-fill loop has put id into the cache, ctx
@@ -290,26 +315,64 @@ func (s *Stream) Info() Info {
 	}
 }
 
-func (s *Stream) Get(ctx context.Context, fromID, toID uint64) ([]*storage.Record, error) {
+// Get appends the records fromID through toID to dst and returns the extended
+// slice. A caller reading repeatedly, like a tail, can pass the previous result
+// back as dst[:0] so each read does not allocate a new slice: with 512 tails
+// those slices were 68% of the bytes the stream allocated. On an error it
+// returns dst with its original length, so the caller keeps the slice: a tail
+// waiting for new records gets ErrOutOfBounds on every check.
+func (s *Stream) Get(ctx context.Context, fromID, toID uint64, dst []*storage.Record) ([]*storage.Record, error) {
 	first, last, err := s.storage.ClampRange(fromID, toID, s.lastCached.Load())
 	if err != nil {
-		return nil, err
+		return dst, err
+	}
+
+	// The next ID to read is always base plus the length of records. Should
+	// base wrap below zero, adding the length wraps it back.
+	start := len(dst)
+	base := first - uint64(start)
+	records := growRecords(dst, last-first+1)
+
+	// A caught-up tail finds its whole range among the recent records.
+	records = s.recent.appendRange(first, last, records)
+	next := base + uint64(len(records))
+	if next > last {
+		return records, nil
 	}
 
 	// One range lookup takes the cache lock once per read. A lookup per ID took
 	// it once per record, and with many tails waking on the same batch the lock
 	// was the main CPU cost.
-	records, err := s.lru.GetRange(first, last, make([]*storage.Record, 0, last-first+1))
+	cached, err := s.lru.GetRange(next, last, records)
 	switch {
 	case err == nil:
-		return records, nil
+		return cached, nil
 	case errors.Is(err, lru.ErrCacheMiss):
 		// Read the rest of the range from the first miss with one WAL reader,
 		// which costs one open and one index lookup instead of one per record.
-		return s.readAndCacheRange(ctx, records, first+uint64(len(records)), last)
+		read, readErr := s.readRange(ctx, cached, base+uint64(len(cached)), last)
+		if readErr != nil {
+			return records[:start], readErr
+		}
+
+		return read, nil
 	default:
-		return nil, err
+		return records[:start], err
 	}
+}
+
+// growRecords returns dst with room for n more records, so a reused dst with
+// enough room is not reallocated and a new one is allocated once at its final
+// size.
+func growRecords(dst []*storage.Record, n uint64) []*storage.Record {
+	if uint64(cap(dst)) >= uint64(len(dst))+n {
+		return dst
+	}
+
+	grown := make([]*storage.Record, len(dst), uint64(len(dst))+n)
+	copy(grown, dst)
+
+	return grown
 }
 
 func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
@@ -333,12 +396,9 @@ func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
 
 	result.DeletedRange = Range{first: oldFirst, last: evictBelow - 1}
 
-	keys := make([]uint64, 0, evictBelow-oldFirst)
-	for id := oldFirst; id < evictBelow; id++ {
-		keys = append(keys, id)
-	}
-
-	s.lru.Delete(keys...)
+	// DeleteRange costs at most one pass over the cache, where listing every
+	// deleted ID cost memory and lock time that grew with the deleted range.
+	s.lru.DeleteRange(oldFirst, evictBelow-1)
 	s.notify()
 
 	return result, nil
@@ -359,11 +419,12 @@ func (s *Stream) ReconcileCache(ctx context.Context) error {
 	}
 }
 
-// readAndCacheRange reads [fromID, toID] from the WAL in one pass, caches each
-// record and appends it to records.
-func (s *Stream) readAndCacheRange(ctx context.Context, records []*storage.Record, fromID, toID uint64) ([]*storage.Record, error) {
+// readRange reads [fromID, toID] from the WAL in one pass and appends each
+// record to records. The records are not cached: a reader far behind would
+// otherwise fill the cache with old records and evict the newest ones, which
+// every live tail reads, sending all of them to the WAL as well.
+func (s *Stream) readRange(ctx context.Context, records []*storage.Record, fromID, toID uint64) ([]*storage.Record, error) {
 	err := s.storage.ReadEach(ctx, fromID, toID, func(r *storage.Record) error {
-		s.lru.Put(r.ID, r)
 		records = append(records, r)
 
 		return nil
@@ -384,6 +445,8 @@ func (s *Stream) fetchAndCacheRecords(ctx context.Context, fromID, toID uint64) 
 
 	return s.storage.ReadEach(ctx, fromID, toID, func(r *storage.Record) error {
 		s.lru.Put(r.ID, r)
+		s.recent.put(r)
+
 		return nil
 	})
 }
@@ -405,6 +468,8 @@ func (s *Stream) notify() {
 	s.newDataReadySig = make(chan struct{})
 	s.mu.Unlock()
 	close(prev)
+
+	s.watchers.wake()
 }
 
 func (s *Stream) startedSignal() <-chan struct{} {

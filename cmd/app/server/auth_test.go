@@ -85,7 +85,9 @@ func (fakeStream) Add(context.Context, []*storage.Record) (stream.AddResult, err
 	return stream.AddResult{}, nil
 }
 
-func (fakeStream) Get(context.Context, uint64, uint64) ([]*storage.Record, error) { return nil, nil }
+func (fakeStream) Get(context.Context, uint64, uint64, []*storage.Record) ([]*storage.Record, error) {
+	return nil, nil
+}
 
 func (fakeStream) Del(context.Context, uint64) (stream.DelResult, error) {
 	return stream.DelResult{}, nil
@@ -95,7 +97,7 @@ func (fakeStream) Info() stream.Info { return stream.Info{FirstID: 1, LastID: 3}
 
 func (fakeStream) FirstID() uint64 { return 1 }
 
-func (fakeStream) DataReady() <-chan struct{} { return make(chan struct{}) }
+func (fakeStream) Watch() (wake <-chan struct{}, stop func()) { return make(chan struct{}), func() {} }
 
 func (fakeStream) ReconcileCache(context.Context) error { return nil }
 
