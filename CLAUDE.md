@@ -28,6 +28,8 @@ runs with it off.
 
 Run the server with `WAL_DIR` set — it is the one required setting. Every config field is both a
 flag and an uppercased env var (`--dedup_window` / `DEDUP_WINDOW`); `auth_token` is env-only.
+`task docker-run` publishes pprof on `127.0.0.1:6060`; e.g.
+`go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30`.
 
 ## Architecture
 
@@ -41,8 +43,12 @@ internal/dedup   time-windowed dedup-key set
 ```
 
 `cmd/app/stratus.go` wires them bottom-up (wal → storage+dedup → stream+lru → grpc server) and runs
-three errgroup goroutines: signal handling, `stream.Start`, and `grpc.Serve`. `stream.Start` preloads
-the newest `cache_size` records of the WAL range (`stream.WithCacheSize`; `ReconcileCache` does the
+three errgroup goroutines: signal handling, `stream.Start`, and `grpc.Serve`. When `pprof_addr` is set,
+`startPprof` also serves `net/http/pprof` on its own mux and plain HTTP listener, outside the errgroup
+and without auth or TLS: a pprof listen or serve error is only logged so streaming continues, and the
+signal goroutine shuts it down before `GracefulStop`. `pprof_block_rate`/`pprof_mutex_fraction`
+(default 0) are passed straight to `runtime.SetBlockProfileRate`/`SetMutexProfileFraction`.
+`stream.Start` preloads the newest `cache_size` records of the WAL range (`stream.WithCacheSize`; `ReconcileCache` does the
 same), then blocks forever consuming a `storage.Subscribe` follower channel
 (buffered by `subscriber_buffer`, default 1024). It puts every record already waiting into the LRU
 and then fires one `notify()`, so each `ReadOffset` tail wakes to a batch and sends it as one
