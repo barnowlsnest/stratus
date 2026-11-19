@@ -51,13 +51,19 @@ many tails. Startup waits on `WaitForStart` before
 serving, so the cache is warm before the first RPC.
 
 Reads go through the cache: `Stream.Get` clamps the range in storage to the last ID the cache-fill
-loop has put into the LRU (`lastCached`), then takes the range from the LRU in one `GetRange`
-lookup (one lock per read, not per ID); from the first evicted ID it reads the rest of the range
-from the WAL in one pass and caches every record. `Stream.Add`
+loop has put into the LRU (`lastCached`), then takes what it can from the newest `subscriber_buffer`
+records (`recent`, a slot per ID under a shared lock, so caught-up tails never take the LRU's
+exclusive lock), the rest from the LRU in one `GetRange` lookup (one lock per read, not per ID);
+from the first evicted ID it reads the rest of the range from the WAL in one pass without caching
+it, so old reads never evict the records tails need. `Get` appends to a caller's slice, which
+`ReadOffset` reuses between reads. `Stream.Add`
 waits until `lastCached` reaches its last ID before returning, and reported stream ranges end at
 `lastCached`.
-`ReadOffset` is the live tail — the handler drains what exists and then waits on `Stream.DataReady()`
-(the channel `notify()` closes and replaces) for more.
+`ReadOffset` is the live tail — the handler registers with `Stream.Watch()` before its first read,
+drains what exists and then waits on its own wake channel (buffered by one; `notify()` leaves a
+wake-up in every tail's channel without blocking) for more. Tails must not share one channel: every
+woken tail re-locks it on the way out of `select`, which was 19% of CPU with 512 tails.
+`Stream.DataReady()` (the channel `notify()` closes and replaces) stays for `Add`'s wait.
 
 Boundary rules, so they stay in one place:
 
@@ -80,8 +86,14 @@ needs a matching DTO/conversion change there.
 
 `cmd/cli` is a cobra CLI (one command per RPC) plus a bubbletea TUI (`--tui`) in `cmd/cli/tui`.
 
-Known gap: `config.MaxBatchReadSize` (`max_batch_read_size`) is parsed but never wired into storage,
-which keeps `defaultReadBatchSize = 64`.
+`ReadOffset` reads through `Stream.GetBatch`, which bounds each message: at most
+`max_batch_read_size` records (`storage.ClampBatch`) and `max_read_bytes` of encoded size, always
+at least one record. The budget counts each record as its payload plus `recordOverhead` (20 bytes,
+an upper bound on protobuf's per-record cost). The 32,000 default keeps messages under 32 KiB, so
+gRPC encodes them into 32 KB pooled buffers: larger messages take 1 MB buffers, one per lagging
+tail, which was 3.4 GiB RSS with 2048 tails. Before the limits, a tail far behind got its whole
+backlog in one message and failed past the client's 4 MiB receive limit. `ReadRange` still uses
+`Get`, which has neither limit.
 
 ## Conventions
 

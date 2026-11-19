@@ -20,18 +20,18 @@ func TestStorageSuite(t *testing.T) {
 	suite.Run(t, new(StorageSuite))
 }
 
-// newStorage opens a fresh WAL-backed storage and appends count records.
-func (s *StorageSuite) newStorage(count int) *storage.Storage {
+// newStorage opens a fresh WAL-backed storage with opts and appends count records.
+func (s *StorageSuite) newStorage(count int, opts ...storage.Option) *storage.Storage {
 	s.T().Helper()
 
 	w, _, err := wal.Open(s.T().TempDir())
 	s.Require().NoError(err)
 	s.T().Cleanup(func() { _ = w.Close() })
 
-	st, err := storage.New(
+	st, err := storage.New(append([]storage.Option{
 		storage.WithWAL(w),
 		storage.WithDeduplicator(dedup.New(0)),
-	)
+	}, opts...)...)
 	s.Require().NoError(err)
 
 	if count == 0 {
@@ -98,6 +98,44 @@ func (s *StorageSuite) TestClampRangeCeiling() {
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
 			actualFrom, actualTo, err := st.ClampRange(tc.fromID, tc.toID, tc.ceiling)
+			if tc.expectedErr != nil {
+				s.Require().ErrorIs(err, tc.expectedErr)
+
+				return
+			}
+
+			s.Require().NoError(err)
+			s.Equal(tc.expectedFrom, actualFrom)
+			s.Equal(tc.expectedTo, actualTo)
+		})
+	}
+}
+
+// ClampBatch clamps like ClampRange and also ends the range after at most the
+// max read batch size records.
+func (s *StorageSuite) TestClampBatch() {
+	tests := []struct {
+		expectedErr  error
+		name         string
+		fromID       uint64
+		toID         uint64
+		ceiling      uint64
+		expectedFrom uint64
+		expectedTo   uint64
+	}{
+		{name: "range within batch size", fromID: 3, toID: 5, ceiling: 10, expectedFrom: 3, expectedTo: 5},
+		{name: "range of exactly batch size", fromID: 3, toID: 6, ceiling: 10, expectedFrom: 3, expectedTo: 6},
+		{name: "range longer than batch size", fromID: 1, toID: 100, ceiling: 10, expectedFrom: 1, expectedTo: 4},
+		{name: "huge end id", fromID: 2, toID: ^uint64(0), ceiling: 10, expectedFrom: 2, expectedTo: 5},
+		{name: "ceiling inside batch", fromID: 5, toID: 100, ceiling: 6, expectedFrom: 5, expectedTo: 6},
+		{name: "zero sentinels", fromID: 0, toID: 0, ceiling: 10, expectedFrom: 1, expectedTo: 4},
+		{name: "range above ceiling", fromID: 7, toID: 9, ceiling: 6, expectedErr: storage.ErrOutOfBounds},
+	}
+
+	st := s.newStorage(10, storage.WithMaxReadBatchSize(4))
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			actualFrom, actualTo, err := st.ClampBatch(tc.fromID, tc.toID, tc.ceiling)
 			if tc.expectedErr != nil {
 				s.Require().ErrorIs(err, tc.expectedErr)
 
