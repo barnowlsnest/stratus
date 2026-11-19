@@ -81,6 +81,29 @@ func (s *ConfigSuite) TestApplyDefaults() {
 			cfg:      Config{WALBatchSize: 4, WALMaxSegmentSize: 1 << 20, WALMaxRecordSize: 1 << 10, SubscriberBuffer: 64},
 			expected: Config{WALBatchSize: 4, WALMaxSegmentSize: 1 << 20, WALMaxRecordSize: 1 << 10, SubscriberBuffer: 64},
 		},
+		{
+			name: "pprof unset stays disabled",
+			cfg:  Config{PprofAddr: "", PprofBlockRate: 0, PprofMutexFrac: 0},
+			expected: Config{
+				WALBatchSize:      DefaultWALBatchSize,
+				WALMaxSegmentSize: DefaultWALMaxSegmentSize,
+				WALMaxRecordSize:  DefaultWALMaxRecordSize,
+				SubscriberBuffer:  DefaultSubscriberBuffer,
+			},
+		},
+		{
+			name: "pprof set is kept",
+			cfg:  Config{PprofAddr: "127.0.0.1:6060", PprofBlockRate: 10_000, PprofMutexFrac: 100},
+			expected: Config{
+				WALBatchSize:      DefaultWALBatchSize,
+				WALMaxSegmentSize: DefaultWALMaxSegmentSize,
+				WALMaxRecordSize:  DefaultWALMaxRecordSize,
+				SubscriberBuffer:  DefaultSubscriberBuffer,
+				PprofAddr:         "127.0.0.1:6060",
+				PprofBlockRate:    10_000,
+				PprofMutexFrac:    100,
+			},
+		},
 	}
 
 	for i := range cases {

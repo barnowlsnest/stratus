@@ -310,6 +310,9 @@ Settings come from flags or environment variables of the same name (uppercased).
 | `auth_token`           | —           | bearer token every RPC must carry; env `AUTH_TOKEN` only, no flag; optional                                                |
 | `tls_cert_file`        | —           | PEM certificate; enables TLS together with `tls_key_file`                                                                  |
 | `tls_key_file`         | —           | PEM private key; enables TLS together with `tls_cert_file`                                                                 |
+| `pprof_addr`           | —           | pprof HTTP listen address, e.g. `127.0.0.1:6060`; empty disables it; no auth or TLS; see [Profiling](#profiling)           |
+| `pprof_block_rate`     | `0`         | `runtime.SetBlockProfileRate` value; `0` disables block profiling                                                          |
+| `pprof_mutex_fraction` | `0`         | `runtime.SetMutexProfileFraction` value; `0` disables mutex profiling                                                      |
 
 ### Security
 
@@ -336,6 +339,20 @@ TLS_CERT_FILE=server.crt TLS_KEY_FILE=server.key WAL_DIR=/var/lib/stratus stratu
 
 Clients connect with `stratusv1.WithTLS(caFile)` in Go, or `--tls`/`--tls_ca_file` on `stratuscli`.
 Leave both unset and it serves plaintext, also with a warning; setting only one is a config error.
+
+### Profiling
+
+pprof is off by default. Set `pprof_addr` to serve the standard `/debug/pprof/` handlers on a
+separate plain HTTP listener. It skips `AUTH_TOKEN` and TLS, so bind it only where the network is
+trusted. If it cannot listen or fails while running, the server logs the error and keeps streaming.
+Block and mutex profiles stay empty until `pprof_block_rate` and `pprof_mutex_fraction` are set.
+
+```sh
+PPROF_ADDR=127.0.0.1:6060 PPROF_BLOCK_RATE=10000 PPROF_MUTEX_FRACTION=100 WAL_DIR=/var/lib/stratus stratus
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30   # CPU
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap                 # memory
+go tool pprof http://127.0.0.1:6060/debug/pprof/mutex                # lock contention
+```
 
 ## Building from source
 

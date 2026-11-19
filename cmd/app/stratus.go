@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	"net/http/pprof"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -28,6 +32,12 @@ import (
 const (
 	stopTimeout  = 5 * time.Second
 	startTimeout = 30 * time.Second
+
+	addrField = "addr"
+
+	pprofReadHeaderTimeout = 5 * time.Second
+	// pprofWriteTimeout must outlast the longest ?seconds= a CPU profile or trace asks for.
+	pprofWriteTimeout = 2 * time.Minute
 )
 
 func main() {
@@ -82,10 +92,13 @@ func run() error {
 
 	stratusv1.RegisterStreamServiceServer(grpcServer, server.New(walStream))
 
+	pprofServer := startPprof(appCfg, appLogger)
+
 	var g errgroup.Group
 	g.Go(func() error {
 		<-sysCtx.Done()
 		appLogger.Info(fmt.Sprintf("shutting down: %s", context.Cause(sysCtx).Error()))
+		stopPprof(pprofServer, appLogger)
 		grpcServer.GracefulStop()
 		return sysCtx.Err()
 	})
@@ -100,7 +113,7 @@ func run() error {
 	appLogger.Info("stream is ready")
 
 	g.Go(func() error {
-		appLogger.Info("grpc: serving", logger.Field{Key: "addr", Value: addr})
+		appLogger.Info("grpc: serving", logger.Field{Key: addrField, Value: addr})
 		defer sysCancel()
 		return grpcServer.Serve(lis)
 	})
@@ -200,4 +213,58 @@ func newStream(s *storage.Storage, appCfg *config.Config) (*stream.Stream, error
 		stream.WithSubscriberBuffer(appCfg.SubscriberBuffer),
 		stream.WithMaxReadBytes(appCfg.MaxReadBytes),
 	)
+}
+
+// startPprof serves the pprof handlers on cfg.PprofAddr and returns the server,
+// or nil when pprof is disabled or cannot listen. Its failures are only logged,
+// so streaming never stops because of the profiling endpoint.
+func startPprof(cfg *config.Config, appLogger *logger.Logger) *http.Server {
+	if cfg.PprofAddr == "" {
+		return nil
+	}
+
+	runtime.SetBlockProfileRate(cfg.PprofBlockRate)
+	runtime.SetMutexProfileFraction(cfg.PprofMutexFrac)
+
+	lis, err := net.Listen("tcp", cfg.PprofAddr)
+	if err != nil {
+		appLogger.Error(fmt.Sprintf("pprof: listen: %s", err.Error()))
+		return nil
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	srv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: pprofReadHeaderTimeout,
+		WriteTimeout:      pprofWriteTimeout,
+	}
+
+	go func() {
+		appLogger.Info("pprof: serving", logger.Field{Key: addrField, Value: cfg.PprofAddr})
+		if err := srv.Serve(lis); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			appLogger.Error(fmt.Sprintf("pprof: serve: %s", err.Error()))
+		}
+	}()
+
+	return srv
+}
+
+// stopPprof shuts the pprof server down within stopTimeout; a nil server is a no-op.
+func stopPprof(srv *http.Server, appLogger *logger.Logger) {
+	if srv == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		appLogger.Error(fmt.Sprintf("pprof: shutdown: %s", err.Error()))
+	}
 }

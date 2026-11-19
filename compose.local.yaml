@@ -7,12 +7,14 @@ services:
         - stratus_net
     ports:
       - "127.0.0.1:8000:8000"
+      - "127.0.0.1:6060:6060"
     volumes:
       - stratus_wal:/usr/wal
     environment:
       - HOST=0.0.0.0
       - LOG_LEVEL=debug
       - WAL_DIR=/usr/wal
+      - PPROF_ADDR=0.0.0.0:6060
 
 volumes:
   stratus_wal:

@@ -37,6 +37,9 @@ type Config struct {
 	AuthToken         string        `name:"auth_token" flag:"-" usage:"bearer token clients must present"`
 	TLSCertFile       string        `name:"tls_cert_file" usage:"PEM certificate file"`
 	TLSKeyFile        string        `name:"tls_key_file" usage:"PEM private key file"`
+	PprofAddr         string        `name:"pprof_addr" usage:"pprof HTTP listen address, e.g. 127.0.0.1:6060; empty disables it"`
+	PprofBlockRate    int           `name:"pprof_block_rate" usage:"runtime.SetBlockProfileRate value; 0 disables block profiling"`
+	PprofMutexFrac    int           `name:"pprof_mutex_fraction" usage:"runtime.SetMutexProfileFraction value; 0 disables mutex profiling"`
 }
 
 func (c *Config) TLSEnabled() bool {
