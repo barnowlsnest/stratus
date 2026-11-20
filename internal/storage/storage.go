@@ -87,11 +87,10 @@ func (r *Record) validate() error {
 }
 
 // ClampRange resolves zero sentinels (from == first, to == last) and clamps an
-// overlapping range to the available window, which ends at the lower of the
-// WAL's last ID and ceiling. A range that falls entirely outside the window
-// returns ErrOutOfBounds.
-func (s *Storage) ClampRange(fromID, toID, ceiling uint64) (from, to uint64, err error) {
-	first, last := s.wal.FirstLSN(), min(s.wal.LastLSN(), ceiling)
+// overlapping range to [first, last]. Callers pass first/last from cached
+// atomics (or a one-shot WAL read) so hot paths like GetBatch do not take the
+// WAL lock. A range that falls entirely outside the window returns ErrOutOfBounds.
+func (s *Storage) ClampRange(fromID, toID, first, last uint64) (from, to uint64, err error) {
 	if fromID == 0 {
 		fromID = first
 	}
@@ -117,8 +116,8 @@ func (s *Storage) ClampRange(fromID, toID, ceiling uint64) (from, to uint64, err
 // ClampBatch is ClampRange for a read sent to a client as one message: it also
 // ends the range after at most the max read batch size records, so a reader far
 // behind gets its backlog in bounded batches instead of in one message.
-func (s *Storage) ClampBatch(fromID, toID, ceiling uint64) (from, to uint64, err error) {
-	from, to, err = s.ClampRange(fromID, toID, ceiling)
+func (s *Storage) ClampBatch(fromID, toID, first, last uint64) (from, to uint64, err error) {
+	from, to, err = s.ClampRange(fromID, toID, first, last)
 	if err != nil {
 		return 0, 0, err
 	}

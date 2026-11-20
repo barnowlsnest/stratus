@@ -19,6 +19,15 @@ const (
 	// DefaultSubscriberBuffer is how many records the WAL follower can queue for
 	// the cache-fill loop, which caches all of them before waking tails once.
 	DefaultSubscriberBuffer = 1024
+	// DefaultMaxConcurrentStreams caps simultaneous gRPC streams (ReadOffset tails).
+	DefaultMaxConcurrentStreams = 4096
+	// DefaultGRPCKeepaliveTime is how long a connection may be idle before the
+	// server pings; without this, NAT/LBs silently drop long-lived ReadOffset streams.
+	DefaultGRPCKeepaliveTime = 2 * time.Minute
+	// DefaultGRPCKeepaliveTimeout is how long the server waits for a ping ack.
+	DefaultGRPCKeepaliveTimeout = 20 * time.Second
+	// DefaultGRPCKeepaliveMinTime is the minimum client ping interval the server accepts.
+	DefaultGRPCKeepaliveMinTime = 5 * time.Second
 )
 
 type Config struct {
@@ -40,6 +49,12 @@ type Config struct {
 	PprofAddr         string        `name:"pprof_addr" usage:"pprof HTTP listen address, e.g. 127.0.0.1:6060; empty disables it"`
 	PprofBlockRate    int           `name:"pprof_block_rate" usage:"runtime.SetBlockProfileRate value; 0 disables block profiling"`
 	PprofMutexFrac    int           `name:"pprof_mutex_fraction" usage:"runtime.SetMutexProfileFraction value; 0 disables mutex profiling"`
+	// MaxConcurrentStreams caps simultaneous gRPC streams (ReadOffset tails).
+	MaxConcurrentStreams int `name:"max_concurrent_streams" usage:"max simultaneous gRPC streams"`
+	// GRPCKeepaliveTime is idle time before the server pings long-lived streams.
+	GRPCKeepaliveTime    time.Duration `name:"grpc_keepalive_time" usage:"idle time before server keepalive ping"`
+	GRPCKeepaliveTimeout time.Duration `name:"grpc_keepalive_timeout" usage:"wait for keepalive ping ack"`
+	GRPCKeepaliveMinTime time.Duration `name:"grpc_keepalive_min_time" usage:"minimum client ping interval accepted"`
 }
 
 func (c *Config) TLSEnabled() bool {
@@ -86,5 +101,21 @@ func (c *Config) applyDefaults() {
 
 	if c.SubscriberBuffer <= 0 {
 		c.SubscriberBuffer = DefaultSubscriberBuffer
+	}
+
+	if c.MaxConcurrentStreams <= 0 {
+		c.MaxConcurrentStreams = DefaultMaxConcurrentStreams
+	}
+
+	if c.GRPCKeepaliveTime == 0 {
+		c.GRPCKeepaliveTime = DefaultGRPCKeepaliveTime
+	}
+
+	if c.GRPCKeepaliveTimeout <= 0 {
+		c.GRPCKeepaliveTimeout = DefaultGRPCKeepaliveTimeout
+	}
+
+	if c.GRPCKeepaliveMinTime <= 0 {
+		c.GRPCKeepaliveMinTime = DefaultGRPCKeepaliveMinTime
 	}
 }

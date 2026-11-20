@@ -97,7 +97,9 @@ func (s *StorageSuite) TestClampRangeCeiling() {
 	st := s.newStorage(10)
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			actualFrom, actualTo, err := st.ClampRange(tc.fromID, tc.toID, tc.ceiling)
+			// first=1 from the preload; last mirrors the old min(WAL last, ceiling).
+			last := min(uint64(10), tc.ceiling)
+			actualFrom, actualTo, err := st.ClampRange(tc.fromID, tc.toID, 1, last)
 			if tc.expectedErr != nil {
 				s.Require().ErrorIs(err, tc.expectedErr)
 
@@ -135,7 +137,8 @@ func (s *StorageSuite) TestClampBatch() {
 	st := s.newStorage(10, storage.WithMaxReadBatchSize(4))
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
-			actualFrom, actualTo, err := st.ClampBatch(tc.fromID, tc.toID, tc.ceiling)
+			last := min(uint64(10), tc.ceiling)
+			actualFrom, actualTo, err := st.ClampBatch(tc.fromID, tc.toID, 1, last)
 			if tc.expectedErr != nil {
 				s.Require().ErrorIs(err, tc.expectedErr)
 

@@ -67,6 +67,23 @@ func (s *ServerSuite) TestToOutputRecords() {
 	}
 }
 
+// borrowOutputRecords matches toOutputRecords and is safe to release after use.
+func (s *ServerSuite) TestBorrowOutputRecords() {
+	input := []*storage.Record{{ID: 1, Bytes: []byte("a")}, {ID: 2, Bytes: []byte("bb")}}
+	actual, release := borrowOutputRecords(input)
+	s.Require().Len(actual, len(input))
+	for i, expected := range input {
+		s.Equal(expected.ID, actual[i].GetId())
+		s.Equal(expected.Bytes, actual[i].GetRawData())
+	}
+	release()
+
+	// A second borrow should succeed after release (pool reuse).
+	again, release2 := borrowOutputRecords(input)
+	s.Require().Len(again, len(input))
+	release2()
+}
+
 // startServer runs a stream over a fresh WAL and serves it over an in-memory
 // connection, returning the stream and a connected client.
 func (s *ServerSuite) startServer() (*stream.Stream, *stratusv1.Client) {

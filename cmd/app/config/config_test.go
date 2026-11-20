@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 )
@@ -60,48 +61,72 @@ func (s *ConfigSuite) TestApplyDefaults() {
 			name: "unset",
 			cfg:  Config{},
 			expected: Config{
-				WALBatchSize:      DefaultWALBatchSize,
-				WALMaxSegmentSize: DefaultWALMaxSegmentSize,
-				WALMaxRecordSize:  DefaultWALMaxRecordSize,
-				SubscriberBuffer:  DefaultSubscriberBuffer,
+				WALBatchSize:         DefaultWALBatchSize,
+				WALMaxSegmentSize:    DefaultWALMaxSegmentSize,
+				WALMaxRecordSize:     DefaultWALMaxRecordSize,
+				SubscriberBuffer:     DefaultSubscriberBuffer,
+				MaxConcurrentStreams: DefaultMaxConcurrentStreams,
+				GRPCKeepaliveTime:    DefaultGRPCKeepaliveTime,
+				GRPCKeepaliveTimeout: DefaultGRPCKeepaliveTimeout,
+				GRPCKeepaliveMinTime: DefaultGRPCKeepaliveMinTime,
 			},
 		},
 		{
 			name: "negative",
 			cfg:  Config{WALBatchSize: -1, WALMaxSegmentSize: -1, WALMaxRecordSize: -1, SubscriberBuffer: -1},
 			expected: Config{
-				WALBatchSize:      DefaultWALBatchSize,
-				WALMaxSegmentSize: DefaultWALMaxSegmentSize,
-				WALMaxRecordSize:  DefaultWALMaxRecordSize,
-				SubscriberBuffer:  DefaultSubscriberBuffer,
+				WALBatchSize:         DefaultWALBatchSize,
+				WALMaxSegmentSize:    DefaultWALMaxSegmentSize,
+				WALMaxRecordSize:     DefaultWALMaxRecordSize,
+				SubscriberBuffer:     DefaultSubscriberBuffer,
+				MaxConcurrentStreams: DefaultMaxConcurrentStreams,
+				GRPCKeepaliveTime:    DefaultGRPCKeepaliveTime,
+				GRPCKeepaliveTimeout: DefaultGRPCKeepaliveTimeout,
+				GRPCKeepaliveMinTime: DefaultGRPCKeepaliveMinTime,
 			},
 		},
 		{
-			name:     "set",
-			cfg:      Config{WALBatchSize: 4, WALMaxSegmentSize: 1 << 20, WALMaxRecordSize: 1 << 10, SubscriberBuffer: 64},
-			expected: Config{WALBatchSize: 4, WALMaxSegmentSize: 1 << 20, WALMaxRecordSize: 1 << 10, SubscriberBuffer: 64},
+			name: "set",
+			cfg: Config{
+				WALBatchSize: 4, WALMaxSegmentSize: 1 << 20, WALMaxRecordSize: 1 << 10, SubscriberBuffer: 64,
+				MaxConcurrentStreams: 512,
+				GRPCKeepaliveTime:    30 * time.Second, GRPCKeepaliveTimeout: 5 * time.Second, GRPCKeepaliveMinTime: time.Second,
+			},
+			expected: Config{
+				WALBatchSize: 4, WALMaxSegmentSize: 1 << 20, WALMaxRecordSize: 1 << 10, SubscriberBuffer: 64,
+				MaxConcurrentStreams: 512,
+				GRPCKeepaliveTime:    30 * time.Second, GRPCKeepaliveTimeout: 5 * time.Second, GRPCKeepaliveMinTime: time.Second,
+			},
 		},
 		{
 			name: "pprof unset stays disabled",
 			cfg:  Config{PprofAddr: "", PprofBlockRate: 0, PprofMutexFrac: 0},
 			expected: Config{
-				WALBatchSize:      DefaultWALBatchSize,
-				WALMaxSegmentSize: DefaultWALMaxSegmentSize,
-				WALMaxRecordSize:  DefaultWALMaxRecordSize,
-				SubscriberBuffer:  DefaultSubscriberBuffer,
+				WALBatchSize:         DefaultWALBatchSize,
+				WALMaxSegmentSize:    DefaultWALMaxSegmentSize,
+				WALMaxRecordSize:     DefaultWALMaxRecordSize,
+				SubscriberBuffer:     DefaultSubscriberBuffer,
+				MaxConcurrentStreams: DefaultMaxConcurrentStreams,
+				GRPCKeepaliveTime:    DefaultGRPCKeepaliveTime,
+				GRPCKeepaliveTimeout: DefaultGRPCKeepaliveTimeout,
+				GRPCKeepaliveMinTime: DefaultGRPCKeepaliveMinTime,
 			},
 		},
 		{
 			name: "pprof set is kept",
 			cfg:  Config{PprofAddr: "127.0.0.1:6060", PprofBlockRate: 10_000, PprofMutexFrac: 100},
 			expected: Config{
-				WALBatchSize:      DefaultWALBatchSize,
-				WALMaxSegmentSize: DefaultWALMaxSegmentSize,
-				WALMaxRecordSize:  DefaultWALMaxRecordSize,
-				SubscriberBuffer:  DefaultSubscriberBuffer,
-				PprofAddr:         "127.0.0.1:6060",
-				PprofBlockRate:    10_000,
-				PprofMutexFrac:    100,
+				WALBatchSize:         DefaultWALBatchSize,
+				WALMaxSegmentSize:    DefaultWALMaxSegmentSize,
+				WALMaxRecordSize:     DefaultWALMaxRecordSize,
+				SubscriberBuffer:     DefaultSubscriberBuffer,
+				MaxConcurrentStreams: DefaultMaxConcurrentStreams,
+				GRPCKeepaliveTime:    DefaultGRPCKeepaliveTime,
+				GRPCKeepaliveTimeout: DefaultGRPCKeepaliveTimeout,
+				GRPCKeepaliveMinTime: DefaultGRPCKeepaliveMinTime,
+				PprofAddr:            "127.0.0.1:6060",
+				PprofBlockRate:       10_000,
+				PprofMutexFrac:       100,
 			},
 		},
 	}

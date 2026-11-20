@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 
 	stratusv1 "github.com/barnowlsnest/stratus/api/grpc/stratus/v1"
 	"github.com/barnowlsnest/stratus/cmd/app/config"
@@ -169,6 +170,20 @@ func newGRPCServer(cfg *config.Config, appLogger *logger.Logger) (*grpc.Server, 
 	} else {
 		appLogger.Warn("grpc: authentication disabled, set AUTH_TOKEN to require it")
 	}
+
+	// Keepalive and a stream cap: idle ReadOffset streams otherwise die behind
+	// NAT/LBs, and unbounded concurrent streams let watcher fan-out grow without limit.
+	opts = append(opts,
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    cfg.GRPCKeepaliveTime,
+			Timeout: cfg.GRPCKeepaliveTimeout,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             cfg.GRPCKeepaliveMinTime,
+			PermitWithoutStream: true,
+		}),
+		grpc.MaxConcurrentStreams(uint32(cfg.MaxConcurrentStreams)), //nolint:gosec // config-validated positive int
+	)
 
 	return grpc.NewServer(opts...), nil
 }

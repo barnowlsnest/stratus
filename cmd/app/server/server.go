@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -19,12 +20,25 @@ import (
 var (
 	readOffsetMinTimeout = 61 * time.Millisecond
 	readOffsetMaxTimeout = 24 * time.Hour
+
+	// outputRecordsPool reuses the block+pointer pair built for each ReadOffset
+	// Send. Fanout heap profiles showed toOutputRecords at ~37% of alloc_space.
+	outputRecordsPool = sync.Pool{New: func() any { return &outputRecordsBuf{} }}
 )
 
 // maxReusedRecords is the largest read slice a ReadOffset tail keeps for its
 // next read. A tail catching up on a long backlog drops its slice instead, so
 // it does not hold that much memory for the rest of the stream.
 const maxReusedRecords = 4096
+
+// maxPooledOutputRecords drops oversized pooled buffers so a catch-up burst
+// does not leave multi-megabyte slabs in the pool forever.
+const maxPooledOutputRecords = 4096
+
+type outputRecordsBuf struct {
+	block []stratusv1.OutputRecord
+	out   []*stratusv1.OutputRecord
+}
 
 type (
 	Stream interface {
@@ -136,7 +150,10 @@ func (s *Server) ReadOffset(req *stratusv1.ReadOffsetRequest, str grpc.ServerStr
 		}
 
 		if len(recs) > 0 {
-			if err := str.Send(&stratusv1.ReadResponse{Records: toOutputRecords(recs)}); err != nil {
+			out, release := borrowOutputRecords(recs)
+			err := str.Send(&stratusv1.ReadResponse{Records: out})
+			release()
+			if err != nil {
 				return err
 			}
 			nextID += uint64(len(recs))
@@ -212,17 +229,50 @@ func toStorageRecords(in []*stratusv1.InputRecord) []*storage.Record {
 
 // toOutputRecords converts records into one block of OutputRecords and a list
 // pointing into it: two allocations per response instead of one per record
-// plus the list, which every tail paid for every batch it sent.
+// plus the list. Used by unary ReadRange, where gRPC marshals after the handler
+// returns so a pooled buffer cannot be released in the handler.
 func toOutputRecords(in []*storage.Record) []*stratusv1.OutputRecord {
 	block := make([]stratusv1.OutputRecord, len(in))
 	out := make([]*stratusv1.OutputRecord, len(in))
+	fillOutputRecords(in, block, out)
+
+	return out
+}
+
+// borrowOutputRecords is the pooled form for ReadOffset. release must run after
+// Send returns: Send marshals before it returns, so the buffer is then free.
+func borrowOutputRecords(in []*storage.Record) (out []*stratusv1.OutputRecord, release func()) {
+	buf := outputRecordsPool.Get().(*outputRecordsBuf)
+	n := len(in)
+	if cap(buf.block) < n {
+		buf.block = make([]stratusv1.OutputRecord, n)
+		buf.out = make([]*stratusv1.OutputRecord, n)
+	} else {
+		buf.block = buf.block[:n]
+		buf.out = buf.out[:n]
+	}
+	fillOutputRecords(in, buf.block, buf.out)
+
+	return buf.out, func() {
+		for i := range buf.block {
+			buf.block[i].RawData = nil
+		}
+		clear(buf.out)
+		buf.block = buf.block[:0]
+		buf.out = buf.out[:0]
+		if cap(buf.block) > maxPooledOutputRecords {
+			return
+		}
+		outputRecordsPool.Put(buf)
+	}
+}
+
+func fillOutputRecords(in []*storage.Record, block []stratusv1.OutputRecord, out []*stratusv1.OutputRecord) {
 	for i, r := range in {
 		block[i].Id = r.ID
 		block[i].RawData = r.Bytes
 		out[i] = &block[i]
 	}
-
-	return out
 }
 
 // reuseRecords empties recs for the next read, clearing it so it does not keep

@@ -44,6 +44,10 @@ type (
 		// The loop receives IDs in order with no gaps, so every ID up to it has
 		// been cached; reads stop here so they never miss on a fresh record.
 		lastCached atomic.Uint64
+		// firstID is the lowest ID reads can return. Cached so ReadOffset does
+		// not take the WAL lock on every loop; updated on Start, Del, Reconcile,
+		// and the first cacheBatch after an empty stream.
+		firstID atomic.Uint64
 		// watchers are the tails' wake channels; see Watch.
 		watchers        watchers
 		mu              sync.RWMutex
@@ -167,6 +171,7 @@ func (s *Stream) Start(ctx context.Context) error {
 	s.stop = pCancel
 
 	first, last := s.storage.Range()
+	s.firstID.Store(first)
 
 	if first > 0 && last > 0 {
 		if err := s.fetchAndCacheRecords(pCtx, first, last); err != nil {
@@ -264,6 +269,9 @@ func (s *Stream) cacheBatch(batch []*storage.Record) {
 	}
 
 	s.recent.put(batch...)
+	// Empty at Start (or after a full delete) leaves firstID at 0; the first
+	// cached record is the new stream start.
+	s.firstID.CompareAndSwap(0, batch[0].ID)
 	s.lastCached.Store(batch[len(batch)-1].ID)
 }
 
@@ -307,21 +315,17 @@ func (s *Stream) waitCached(ctx context.Context, id uint64) {
 	}
 }
 
-// streamRange is the range reads can return: from the WAL's first ID up to the
-// last ID in the cache.
+// streamRange is the range reads can return: from the first ID up to the last
+// ID in the cache.
 func (s *Stream) streamRange() Range {
-	first, _ := s.storage.Range()
-
-	return Range{first: first, last: s.lastCached.Load()}
+	return Range{first: s.firstID.Load(), last: s.lastCached.Load()}
 }
 
-// FirstID is the first ID reads can return. It skips the cache lock that Info
-// takes to count entries, so ReadOffset can check it on every loop: with many
-// tails that count was a bigger CPU cost than the cache read itself.
+// FirstID is the first ID reads can return. It is an atomic so ReadOffset can
+// check it on every loop without taking the WAL lock: with many tails that
+// lock contended with the commit path.
 func (s *Stream) FirstID() uint64 {
-	first, _ := s.storage.Range()
-
-	return first
+	return s.firstID.Load()
 }
 
 func (s *Stream) Info() Info {
@@ -344,7 +348,7 @@ func (s *Stream) Info() Info {
 // returns dst with its original length, so the caller keeps the slice: a tail
 // waiting for new records gets ErrOutOfBounds on every check.
 func (s *Stream) Get(ctx context.Context, fromID, toID uint64, dst []*storage.Record) ([]*storage.Record, error) {
-	first, last, err := s.storage.ClampRange(fromID, toID, s.lastCached.Load())
+	first, last, err := s.storage.ClampRange(fromID, toID, s.firstID.Load(), s.lastCached.Load())
 	if err != nil {
 		return dst, err
 	}
@@ -359,7 +363,9 @@ func (s *Stream) Get(ctx context.Context, fromID, toID uint64, dst []*storage.Re
 // thus gets its backlog in bounded batches: in one message it held the whole
 // backlog in server memory and failed past the client's receive limit.
 func (s *Stream) GetBatch(ctx context.Context, fromID, toID uint64, dst []*storage.Record) ([]*storage.Record, error) {
-	first, last, err := s.storage.ClampBatch(fromID, toID, s.lastCached.Load())
+	// firstID and lastCached avoid WAL locks on every ReadOffset loop; with many
+	// tails ClampBatch's FirstLSN/LastLSN contended with the commit path.
+	first, last, err := s.storage.ClampBatch(fromID, toID, s.firstID.Load(), s.lastCached.Load())
 	if err != nil {
 		return dst, err
 	}
@@ -435,6 +441,7 @@ func (s *Stream) Del(ctx context.Context, upTo uint64) (DelResult, error) {
 	}
 
 	newFirst, _ := s.storage.Range()
+	s.firstID.Store(newFirst)
 	evictBelow := newFirst
 	if newFirst == 0 {
 		evictBelow = oldLast + 1
@@ -468,6 +475,7 @@ func (s *Stream) ReconcileCache(ctx context.Context) error {
 	default:
 		s.lru.Clear()
 		firstID, lastID := s.storage.Range()
+		s.firstID.Store(firstID)
 		return s.fetchAndCacheRecords(ctx, firstID, lastID)
 	}
 }

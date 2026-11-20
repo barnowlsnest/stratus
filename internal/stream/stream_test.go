@@ -429,8 +429,24 @@ func (s *StreamSuite) TestDelEvictsDeletedRecords() {
 			s.Equal(tc.expectedDeleted, [2]uint64{actual.DeletedRange.First(), actual.DeletedRange.Last()})
 			s.Equal(tc.expectedStream, [2]uint64{actual.StreamRange.First(), actual.StreamRange.Last()})
 			s.Equal(tc.expectedCachedIDs, cachedIDs(str.cache, uint64(tc.preload)))
+			s.Equal(tc.expectedStream[0], str.stream.FirstID())
 		})
 	}
+}
+
+// TestFirstIDFromEmptyStart covers the empty-WAL path: firstID stays 0 until
+// the first cacheBatch, then tracks deletes without consulting the WAL.
+func (s *StreamSuite) TestFirstIDFromEmptyStart() {
+	str := s.start(0)
+	s.Equal(uint64(0), str.stream.FirstID())
+
+	_, err := str.stream.Add(context.Background(), s.newRecords(3))
+	s.Require().NoError(err)
+	s.Equal(uint64(1), str.stream.FirstID())
+
+	_, err = str.stream.Del(context.Background(), 3)
+	s.Require().NoError(err)
+	s.Equal(uint64(3), str.stream.FirstID())
 }
 
 // newSizedRecords builds count records of size bytes each, with dedup keys

@@ -161,6 +161,35 @@ of its own.
 Raise `max_read_bytes` only when tails rarely fall behind and records are large; keep it under the
 clients' gRPC receive limit (4 MiB by default).
 
+### Production loadbench
+
+`task loadbench` is a **manual production go/no-go gate**. It is not part of `task sanity`. It builds
+the server, starts it with a temporary WAL and pprof on a free loopback port, drives fixed load
+grades over the real gRPC client, samples **RSS / CPU / WAL disk**, captures CPU and heap profiles,
+and writes a report under `dist/loadbench/`.
+
+```sh
+task loadbench
+# smoke only, shorter grades (duration unit 1s → smoke is 15s):
+task loadbench -- --grades smoke --duration 1s
+# fail if RSS exceeds 50 MiB (useful to verify the gate):
+task loadbench -- --grades smoke --max-rss 50MiB
+```
+
+Exit `0` is **GO**, exit `1` is **NO-GO**. Open `dist/loadbench/report.md` for the table of write/read
+RPS, Add p99, peak RSS, CPU%, disk growth, and max tail lag. Profiles land in
+`dist/loadbench/<grade>/cpu.pb.gz` and `heap.pb.gz`:
+
+```sh
+go tool pprof dist/loadbench/fanout_stress/cpu.pb.gz
+go tool pprof dist/loadbench/lagging/heap.pb.gz
+```
+
+Grades: `smoke`, `write_heavy`, `fanout`, `fanout_stress` (512 tails), `lagging` (slow drains),
+`catchup` (preload then tails from ID 1). Default fail thresholds: peak RSS above 2 GiB, `write_heavy`
+below 500 records/s, `lagging` above 1 GiB RSS, unexpected RPC errors, unbounded lag on caught-up
+grades, or a dead server / unreachable pprof.
+
 ## API
 
 The service is `stratus.v1.StreamService`, defined in [`proto/stratus/v1/stratus.proto`](proto/stratus/v1/stratus.proto).
@@ -365,6 +394,7 @@ task go-build-app             # runs sanity (fmt, vet, lint, test), then builds 
 task go-build-cli             # same, for ./dist/cli/stratuscli
 task go-build-cli-dist        # same, cross-built to ./dist/cli/stratuscli-{linux-amd64,linux-arm64,darwin-arm64}
 task sanity                   # fmt, vet, lint, test
+task loadbench                # production go/no-go load grades + pprof (not in sanity)
 task buf-gen                  # regenerate gRPC code from proto
 task buf-build                # update proto deps and build the descriptor set
 task docker-build             # build the server image (app.Dockerfile)
